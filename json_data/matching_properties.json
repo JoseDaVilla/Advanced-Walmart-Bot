@@ -1,0 +1,38 @@
+[
+  {
+    "store_number": "2423",
+    "store_name": "Store #2423",
+    "address": "PARQUE ESCORIAL",
+    "available_spaces": "1 available space",
+    "google_maps_url": "https://www.google.com/maps/dir/Current+Location/PARQUE ESCORIAL",
+    "spaces": [
+      {
+        "suite": "Unknown",
+        "sqft": 171,
+        "text": "| 171 sqft"
+      }
+    ],
+    "review_count": 11956,
+    "has_mobile_store": false,
+    "meets_criteria": true,
+    "fail_reason": null
+  },
+  {
+    "store_number": "2449",
+    "store_name": "Store #2449",
+    "address": "RAFAEL CORDERO AVE #301",
+    "available_spaces": "2 available spaces",
+    "google_maps_url": "https://www.google.com/maps/dir/Current+Location/RAFAEL CORDERO AVE #301",
+    "spaces": [
+      {
+        "suite": "Unknown",
+        "sqft": 170,
+        "text": "| 170 sqft"
+      }
+    ],
+    "review_count": 11476,
+    "has_mobile_store": false,
+    "meets_criteria": true,
+    "fail_reason": null
+  }
+]
