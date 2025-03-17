@@ -160,13 +160,13 @@ def extract_modal_data(modal_html):
                     sqft_text = sqft_span.text.strip()
                     # Extract the suite number and sqft
                     suite_match = re.search(r'Suite\s+(\w+)', suite_text)
-                    suite = suite_match.group(1) if suite_match else "Unknown"
+                    suite = suite_match.group(1) if suite_match else None
                     
                     sqft_match = re.search(r'(\d+)\s*(?:sq\s*ft|sqft)', sqft_text, re.IGNORECASE)
                     if sqft_match:
                         sqft = int(sqft_match.group(1))
                         spaces.append({
-                            'suite': suite,
+                            'suite': suite or "TBD",  # Use "TBD" instead of "Unknown"
                             'sqft': sqft,
                             'text': f"{suite_text} {sqft_text}"
                         })
@@ -175,28 +175,56 @@ def extract_modal_data(modal_html):
     
     # If we didn't find spaces with the exact structure, fall back to our existing method
     if not spaces:
-        # Extract spaces information - try multiple selectors
-        space_selectors = ['.jss96', '.jss98', 'p[class*="jss"] span']
+        # Try multiple patterns to extract suite information
+        space_text_patterns = [
+            # Try to find any text in the modal with sqft mentioned
+            r"(?:Suite\s+([A-Za-z0-9-]+))?\s*(?:[|:])?\s*(\d+)\s*(?:sq\s*ft|sqft)",
+            r"Suite\s+([A-Za-z0-9-]+)",
+            r"(\d+)\s*(?:sq\s*ft|sqft)"
+        ]
         
-        for selector in space_selectors:
-            space_elements = soup.select(selector)
-            for space_elem in space_elements:
-                space_text = space_elem.text.strip()
-                
-                # Look for square footage pattern
-                sqft_match = re.search(r'(\d+)\s*(?:sq\s*ft|sqft)', space_text, re.IGNORECASE)
-                if sqft_match:
-                    sqft = int(sqft_match.group(1))
-                    
-                    # Extract suite number
-                    suite_match = re.search(r'Suite\s+(\w+)', space_text)
-                    suite = suite_match.group(1) if suite_match else "Unknown"
-                    
-                    spaces.append({
-                        'suite': suite,
-                        'sqft': sqft,
-                        'text': space_text
-                    })
+        # Get all text from the modal
+        modal_text = soup.text
+        
+        # Test each pattern
+        for pattern in space_text_patterns:
+            matches = re.findall(pattern, modal_text, re.IGNORECASE)
+            if matches:
+                if isinstance(matches[0], tuple):
+                    # If pattern captured groups in tuple format
+                    for suite_match, size_match in matches:
+                        try:
+                            suite = suite_match if suite_match else "TBD"
+                            sqft = int(size_match)
+                            spaces.append({
+                                'suite': suite,
+                                'sqft': sqft,
+                                'text': f"Suite {suite} | {sqft} sqft"
+                            })
+                        except (ValueError, IndexError):
+                            continue
+                else:
+                    # If pattern captured just one group
+                    space_selectors = ['.jss96', '.jss98', 'p[class*="jss"] span']
+                    for selector in space_selectors:
+                        space_elements = soup.select(selector)
+                        for space_elem in space_elements:
+                            space_text = space_elem.text.strip()
+                            
+                            # Look for square footage pattern
+                            sqft_match = re.search(r'(\d+)\s*(?:sq\s*ft|sqft)', space_text, re.IGNORECASE)
+                            if sqft_match:
+                                sqft = int(sqft_match.group(1))
+                                
+                                # Extract suite number
+                                suite_match = re.search(r'Suite\s+([A-Za-z0-9-]+)', space_text)
+                                suite = suite_match.group(1) if suite_match else "TBD"
+                                
+                                spaces.append({
+                                    'suite': suite,
+                                    'sqft': sqft,
+                                    'text': space_text
+                                })
     
     return spaces
 
@@ -348,26 +376,95 @@ def check_google_data(property_info):
     try:
         property_address = f"Walmart {property_info['address']}"
         
-        # Get Google reviews
-        review_count = get_google_reviews(property_address)
-        property_info['review_count'] = review_count
-        
-        # Skip further checking if it doesn't meet review threshold
-        if review_count < MIN_REVIEWS:
-            property_info['meets_criteria'] = False
-            property_info['fail_reason'] = f"Only {review_count} reviews (minimum {MIN_REVIEWS})"
-            return property_info
-        
-        # Check for mobile stores
-        has_mobile = has_mobile_store(property_address)
-        property_info['has_mobile_store'] = has_mobile
-        
-        if has_mobile:
-            property_info['meets_criteria'] = False
-            property_info['fail_reason'] = "Has a mobile phone store"
+        # First find the place
+        url = f"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input={requests.utils.quote(property_address)}&inputtype=textquery&fields=place_id,formatted_address,geometry&key={GOOGLE_API_KEY}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if "candidates" in data and data["candidates"]:
+            place_info = data["candidates"][0]
+            place_id = place_info["place_id"]
+            
+            # Save the full formatted address from Google
+            if "formatted_address" in place_info:
+                formatted_address = place_info["formatted_address"]
+                property_info['full_address'] = formatted_address
+                logger.info(f"Got full address: {formatted_address}")
+                
+                # Extract city and zip code from the formatted address
+                location_details = extract_city_zip_from_address(formatted_address)
+                property_info['city'] = location_details['city']
+                property_info['zip_code'] = location_details['zip_code']
+                logger.info(f"Extracted city: {location_details['city']}, zip: {location_details['zip_code']}")
+            else:
+                property_info['full_address'] = property_info['address']
+                property_info['city'] = "Unknown"
+                property_info['zip_code'] = "Unknown"
+
+            # Get the details including review count
+            details_url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=user_ratings_total,formatted_address,formatted_phone_number,website&key={GOOGLE_API_KEY}"
+            details_response = requests.get(details_url, timeout=10)
+            details_response.raise_for_status()
+            details = details_response.json()
+            
+            # Store additional information
+            property_info['review_count'] = details.get("result", {}).get("user_ratings_total", 0)
+            
+            if "formatted_address" in details.get("result", {}):
+                property_info['full_address'] = details["result"]["formatted_address"]
+            
+            if "formatted_phone_number" in details.get("result", {}):
+                property_info['phone_number'] = details["result"]["formatted_phone_number"]
+                
+            if "website" in details.get("result", {}):
+                property_info['website'] = details["result"]["website"]
+                
+            # Skip further checking if it doesn't meet review threshold
+            if property_info['review_count'] < MIN_REVIEWS:
+                property_info['meets_criteria'] = False
+                property_info['fail_reason'] = f"Only {property_info['review_count']} reviews (minimum {MIN_REVIEWS})"
+                return property_info
+            
+            # If we have location geometry, check for mobile stores
+            if "geometry" in place_info:
+                location = place_info["geometry"]["location"]
+                lat = location["lat"]
+                lng = location["lng"]
+                
+                # Get nearby mobile stores
+                mobile_store_status = check_mobile_stores(lat, lng)
+                property_info['mobile_store_search_method'] = "Google Places Nearby Search API"
+                property_info['mobile_store_search_radius'] = "100 meters"
+                property_info['mobile_store_keywords_checked'] = MOBILE_STORE_KEYWORDS
+                property_info['has_mobile_store'] = mobile_store_status['has_mobile']
+                
+                # Store any found matches for reference
+                if mobile_store_status['stores']:
+                    property_info['mobile_stores_found'] = mobile_store_status['stores']
+                
+                if property_info['has_mobile_store']:
+                    property_info['meets_criteria'] = False
+                    property_info['fail_reason'] = "Has a mobile phone store"
+                else:
+                    property_info['meets_criteria'] = True
+                    property_info['fail_reason'] = None
+            else:
+                # Fallback to old method
+                has_mobile = has_mobile_store(property_address)
+                property_info['has_mobile_store'] = has_mobile
+                
+                if has_mobile:
+                    property_info['meets_criteria'] = False
+                    property_info['fail_reason'] = "Has a mobile phone store"
+                else:
+                    property_info['meets_criteria'] = True
+                    property_info['fail_reason'] = None
         else:
-            property_info['meets_criteria'] = True
-            property_info['fail_reason'] = None
+            # Couldn't find the place in Google
+            property_info['review_count'] = 0
+            property_info['meets_criteria'] = False
+            property_info['fail_reason'] = "Location not found in Google Places API"
             
         return property_info
         
@@ -377,6 +474,29 @@ def check_google_data(property_info):
         property_info['meets_criteria'] = False
         property_info['fail_reason'] = f"Error checking Google data: {str(e)}"
         return property_info
+
+
+def extract_city_zip_from_address(address):
+    """Extract city and zip code from a formatted address string."""
+    try:
+        # Try to extract US format ZIP code (5 digits, sometimes with 4 digit extension)
+        zip_match = re.search(r'(\d{5}(?:-\d{4})?)', address)
+        zip_code = zip_match.group(1) if zip_match else "Unknown"
+        
+        # Try to extract city
+        # Pattern looks for "City, STATE ZIP" or "City STATE ZIP" format
+        city_match = re.search(r'([A-Za-z\s\.]+),?\s+[A-Z]{2}\s+\d{5}', address)
+        if city_match:
+            city = city_match.group(1).strip()
+        else:
+            # Try to match without requiring ZIP code in the pattern
+            city_match = re.search(r'([A-Za-z\s\.]+),\s+[A-Z]{2}', address)
+            city = city_match.group(1).strip() if city_match else "Unknown"
+        
+        return {'city': city, 'zip_code': zip_code}
+    except Exception as e:
+        logger.error(f"Error extracting city/zip: {str(e)}")
+        return {'city': "Unknown", 'zip_code': "Unknown"}
 
 
 def get_google_reviews(address):
@@ -450,8 +570,44 @@ def has_mobile_store(address):
         return True  # Assume there is a store in case of error (to be safe)
 
 
+def check_mobile_stores(lat, lng):
+    """Check for mobile phone repair stores near a specific location."""
+    result = {
+        'has_mobile': False,
+        'stores': []
+    }
+    
+    try:
+        radius = "100"  # Search within 100 meters
+        nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius={radius}&keyword=mobile+phone+repair+cell&key={GOOGLE_API_KEY}"
+        nearby_response = requests.get(nearby_url, timeout=10)
+        nearby_response.raise_for_status()
+        nearby_data = nearby_response.json()
+        
+        if "results" in nearby_data and nearby_data["results"]:
+            for place in nearby_data["results"]:
+                place_name = place.get("name", "").lower()
+                
+                # Check if any keywords match
+                matches = [term for term in MOBILE_STORE_KEYWORDS if term.lower() in place_name]
+                if matches:
+                    result['has_mobile'] = True
+                    result['stores'].append({
+                        'name': place.get("name"),
+                        'matched_keywords': matches,
+                        'place_id': place.get("place_id")
+                    })
+    
+    except Exception as e:
+        logger.error(f"Error in check_mobile_stores: {str(e)}")
+        result['has_mobile'] = True  # Assume yes in case of error
+        result['error'] = str(e)
+    
+    return result
+
+
 def send_email(properties):
-    """ todo Send email notification about matching properties."""
+    """Send email notification about matching properties."""
     if not properties:
         logger.info("No properties to notify about")
         return
@@ -500,6 +656,8 @@ def send_email(properties):
                 <tr>
                     <th>Store</th>
                     <th>Address</th>
+                    <th>City</th>
+                    <th>ZIP</th>
                     <th>Spaces</th>
                     <th>Reviews</th>
                     <th>Mobile Store</th>
@@ -513,7 +671,9 @@ def send_email(properties):
         # Add each property to the email
         for prop in properties:
             store_num = prop["store_name"]
-            address = prop["address"]
+            address = prop.get('full_address', prop['address'])  # Use full address if available
+            city = prop.get('city', "Unknown")
+            zip_code = prop.get('zip_code', "Unknown")
             reviews = prop.get("review_count", "N/A")
             
             # Create space details HTML
@@ -521,7 +681,7 @@ def send_email(properties):
             space_text = ""
             
             for space in prop.get("spaces", []):
-                suite = space.get("suite", "Unknown")
+                suite = space.get("suite", "TBD")
                 sqft = space.get("sqft", "Unknown")
                 space_html += f"<li>Suite {suite}: {sqft} sqft</li>"
                 space_text += f"- Suite {suite}: {sqft} sqft\n"
@@ -529,14 +689,17 @@ def send_email(properties):
             space_html += "</ul>"
             
             # All properties in the final list have been confirmed to NOT have mobile stores
-            # So we can display this information
-            mobile_store = "No mobile store detected <span class='check'>✓</span>"
+            method = prop.get('mobile_store_search_method', 'Google Places API')
+            radius = prop.get('mobile_store_search_radius', '100m')
+            mobile_store = f"No mobile stores detected within {radius} <span class='check'>✓</span><br><small>Method: {method}</small>"
             
             # Add to HTML content
             html_content += f"""
                 <tr>
                     <td>{store_num}</td>
                     <td>{address}</td>
+                    <td>{city}</td>
+                    <td>{zip_code}</td>
                     <td>{space_html}</td>
                     <td>{reviews}</td>
                     <td>{mobile_store}</td>
@@ -544,7 +707,7 @@ def send_email(properties):
             """
             
             # Add to text content
-            text_content += f"• {store_num} at {address} - {reviews} reviews - No mobile store ✓\n"
+            text_content += f"• {store_num} at {address} - {city}, {zip_code} - {reviews} reviews - No mobile store ✓\n"
             text_content += space_text
             text_content += "\n"
         
@@ -556,8 +719,12 @@ def send_email(properties):
             <ul>
                 <li>Available space under 1000 sqft</li>
                 <li>Over 10,000 Google reviews</li>
-                <li>No mobile phone repair stores present</li>
+                <li>No mobile phone repair stores present (checked with Google Places API)</li>
             </ul>
+            <p><strong>How Mobile Store Detection Works:</strong> We use the Google Places API to find the exact 
+            geographic coordinates of each Walmart location, then search for nearby 
+            businesses within 100 meters that match mobile phone repair keywords. This ensures we only recommend 
+            locations without competing mobile repair shops.</p>
         </body>
         </html>
         """

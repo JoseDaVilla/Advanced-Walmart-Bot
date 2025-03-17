@@ -1,36 +1,36 @@
 [
   {
-    "store_number": "2423",
-    "store_name": "Store #2423",
-    "address": "PARQUE ESCORIAL",
+    "store_number": "153",
+    "store_name": "Store #153",
+    "address": "202 PARK PLAZA DR",
     "available_spaces": "1 available space",
-    "google_maps_url": "https://www.google.com/maps/dir/Current+Location/PARQUE ESCORIAL",
+    "google_maps_url": "https://www.google.com/maps/dir/Current+Location/202 PARK PLAZA DR",
     "spaces": [
       {
         "suite": "Unknown",
-        "sqft": 171,
-        "text": "| 171 sqft"
+        "sqft": 260,
+        "text": "| 260 sqft"
       }
     ],
-    "review_count": 11956,
+    "review_count": 18380,
     "has_mobile_store": false,
     "meets_criteria": true,
     "fail_reason": null
   },
   {
-    "store_number": "2449",
-    "store_name": "Store #2449",
-    "address": "RAFAEL CORDERO AVE #301",
-    "available_spaces": "2 available spaces",
-    "google_maps_url": "https://www.google.com/maps/dir/Current+Location/RAFAEL CORDERO AVE #301",
+    "store_number": "2912",
+    "store_name": "Store #2912",
+    "address": "7555 TELEGRAPH RD",
+    "available_spaces": "1 available space",
+    "google_maps_url": "https://www.google.com/maps/dir/Current+Location/7555 TELEGRAPH RD",
     "spaces": [
       {
         "suite": "Unknown",
-        "sqft": 170,
-        "text": "| 170 sqft"
+        "sqft": 477,
+        "text": "| 477 sqft"
       }
     ],
-    "review_count": 11476,
+    "review_count": 10101,
     "has_mobile_store": false,
     "meets_criteria": true,
     "fail_reason": null

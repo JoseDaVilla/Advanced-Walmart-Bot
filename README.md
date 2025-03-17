@@ -70,8 +70,21 @@ python walmart_leasing_checker_parallel.py --parallel 8 --schedule
 
 ## ⚙️ How It Works
 
+### Mobile Store Detection
+
+The script identifies whether a Walmart location already has a mobile phone repair store by:
+
+1. Using Google Places API to find the exact geographic coordinates of each Walmart store
+2. Searching for nearby businesses within a 100-meter radius using the `nearbysearch` endpoint
+3. Checking if any businesses match our keywords (CPR, TalknFix, mobile repair, etc.)
+4. Filtering out any Walmart locations that already have competing businesses
+
+This process ensures you only receive notifications about locations where a mobile phone repair business would not have direct competition inside the same Walmart.
+
+### Data Processing Flow
+
 1. **Initial Setup**: The script loads the Walmart leasing page and counts available properties.
-2. **Parallel Processing**: It divides properties among multiple workers for faster processing.
+2. **Parallel Processing**: It divides properties among multiple browser instances (15 by default).
 3. **Data Extraction**: Each worker extracts property details and space information.
 4. **Filtering**: Properties with spaces under 1000 sqft are identified.
 5. **API Verification**: For qualifying properties, it checks Google reviews and nearby businesses.
