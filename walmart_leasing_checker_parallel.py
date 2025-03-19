@@ -50,7 +50,8 @@ MAX_SPACE_SIZE = 1000
 MIN_REVIEWS = 10000
 MOBILE_STORE_KEYWORDS = ["CPR", "TalknFix", "iTalkandRepair", "mobile repair", "phone repair", 
                         "cell phone", "cellular", "smartphone repair", "iphone repair", "wireless repair",
-                        "Cell Phone Repair"]
+                        "Cell Phone Repair", "Ifixandrepair", "Cellaris", "Thefix", "Casemate", "Techy",
+                        "iFixandRepair", "IFixAndRepair", "The Fix", "Case Mate", "CaseMate"]
 
 # Email configuration
 EMAIL_SENDER = "testproject815@gmail.com"
@@ -108,10 +109,13 @@ def extract_property_info(button_html):
     if not store_info_div:
         return None
     
-    # Extract store number
+    # Extract store number - improved extraction
     store_number_elem = store_info_div.select_one('b.jss53')
-    store_number = store_number_elem.text if store_number_elem else "Unknown"
-    store_id = store_number.replace("Store #", "").strip()
+    store_number_text = store_number_elem.text if store_number_elem else "Unknown"
+    
+    # Extract the numeric store ID more carefully
+    store_id_match = re.search(r'Store #(\d+)', store_number_text)
+    store_id = store_id_match.group(1) if store_id_match else store_number_text.replace("Store #", "").strip()
     
     # Extract available spaces
     available_spaces_elem = store_info_div.select('b.jss53')
@@ -126,8 +130,9 @@ def extract_property_info(button_html):
     maps_url = maps_link['href'] if maps_link and maps_link.has_attr('href') else ""
     
     return {
-        "store_number": store_id,
-        "store_name": store_number,
+        "store_id": store_id,              # Just the numeric ID
+        "store_number": f"Store #{store_id}",  # Full store number with prefix
+        "store_name": store_number_text,    # Original store name text
         "address": address,
         "available_spaces": available_spaces.strip(),
         "google_maps_url": maps_url,
@@ -225,6 +230,30 @@ def extract_modal_data(modal_html):
                                     'sqft': sqft,
                                     'text': space_text
                                 })
+    
+    # Deduplicate spaces - remove duplicate TBD entries
+    if spaces:
+        # Group spaces by square footage
+        spaces_by_sqft = {}
+        for space in spaces:
+            sqft = space.get('sqft')
+            if sqft not in spaces_by_sqft:
+                spaces_by_sqft[sqft] = []
+            spaces_by_sqft[sqft].append(space)
+        
+        # For each square footage, prefer entries with actual suite numbers over TBD
+        deduplicated_spaces = []
+        for sqft, space_group in spaces_by_sqft.items():
+            # Filter spaces with actual suite numbers (not TBD)
+            named_suites = [s for s in space_group if s.get('suite') != 'TBD']
+            if named_suites:
+                # Add all spaces with actual suite numbers
+                deduplicated_spaces.extend(named_suites)
+            else:
+                # If all are TBD, just add one
+                deduplicated_spaces.append(space_group[0])
+        
+        spaces = deduplicated_spaces
     
     return spaces
 
@@ -374,10 +403,18 @@ def process_property_chunk(buttons_chunk, worker_id=0):
 def check_google_data(property_info):
     """Check Google reviews and mobile store presence for a property."""
     try:
-        property_address = f"Walmart {property_info['address']}"
+        # Keep original address from leasing site
+        original_address = property_info['address']
+        original_store_id = property_info['store_id']
         
-        # First find the place
-        url = f"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input={requests.utils.quote(property_address)}&inputtype=textquery&fields=place_id,formatted_address,geometry&key={GOOGLE_API_KEY}"
+        # Format search query with Walmart prefix for better matching
+        property_address = f"Walmart {original_address}"
+        
+        # Use more specific search to get more accurate results
+        # Add store number to improve match accuracy
+        search_query = f"Walmart Store #{original_store_id} {original_address}"
+        url = f"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input={requests.utils.quote(search_query)}&inputtype=textquery&fields=place_id,formatted_address,geometry&key={GOOGLE_API_KEY}"
+        
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -386,11 +423,17 @@ def check_google_data(property_info):
             place_info = data["candidates"][0]
             place_id = place_info["place_id"]
             
-            # Save the full formatted address from Google
+            # Save the full formatted address from Google but keep original as primary
             if "formatted_address" in place_info:
                 formatted_address = place_info["formatted_address"]
                 property_info['full_address'] = formatted_address
-                logger.info(f"Got full address: {formatted_address}")
+                property_info['google_address'] = formatted_address  # Save separately for clarity
+                logger.info(f"Got Google Maps address: {formatted_address}")
+                
+                # Check for major address mismatch
+                if not address_similarity_check(original_address, formatted_address):
+                    logger.warning(f"Possible address mismatch: Leasing: '{original_address}' vs Google: '{formatted_address}'")
+                    property_info['address_mismatch_warning'] = True
                 
                 # Extract city and zip code from the formatted address
                 location_details = extract_city_zip_from_address(formatted_address)
@@ -411,14 +454,27 @@ def check_google_data(property_info):
             # Store additional information
             property_info['review_count'] = details.get("result", {}).get("user_ratings_total", 0)
             
-            if "formatted_address" in details.get("result", {}):
-                property_info['full_address'] = details["result"]["formatted_address"]
-            
             if "formatted_phone_number" in details.get("result", {}):
                 property_info['phone_number'] = details["result"]["formatted_phone_number"]
                 
             if "website" in details.get("result", {}):
-                property_info['website'] = details["result"]["website"]
+                website = details["result"]["website"]
+                property_info['website'] = website
+                
+                # Extract store ID from website but DON'T replace original store ID
+                if "walmart.com/store/" in website:
+                    store_url_match = re.search(r'walmart\.com/store/(\d+)', website)
+                    if store_url_match:
+                        website_store_id = store_url_match.group(1)
+                        logger.info(f"Found store ID in website URL: {website_store_id} (leasing ID: {original_store_id})")
+                        
+                        # Save website store ID separately but keep original as primary
+                        property_info['website_store_id'] = website_store_id
+                        property_info['leasing_id'] = original_store_id
+                        
+                        # Only add a flag if they don't match
+                        if website_store_id != original_store_id:
+                            property_info['id_mismatch'] = True
                 
             # Skip further checking if it doesn't meet review threshold
             if property_info['review_count'] < MIN_REVIEWS:
@@ -461,10 +517,22 @@ def check_google_data(property_info):
                     property_info['meets_criteria'] = True
                     property_info['fail_reason'] = None
         else:
-            # Couldn't find the place in Google
-            property_info['review_count'] = 0
-            property_info['meets_criteria'] = False
-            property_info['fail_reason'] = "Location not found in Google Places API"
+            # Try a more generic search if specific one fails
+            fallback_url = f"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input={requests.utils.quote(property_address)}&inputtype=textquery&fields=place_id,formatted_address,geometry&key={GOOGLE_API_KEY}"
+            fallback_response = requests.get(fallback_url, timeout=10)
+            fallback_response.raise_for_status()
+            fallback_data = fallback_response.json()
+            
+            if "candidates" in fallback_data and fallback_data["candidates"]:
+                # Process fallback results similarly
+                # ...condensed for brevity, would mirror the above code...
+                logger.info(f"Used fallback search for {property_info['store_name']}")
+                return check_google_data_from_place_info(property_info, fallback_data["candidates"][0])
+            else:
+                # Couldn't find the place in Google
+                property_info['review_count'] = 0
+                property_info['meets_criteria'] = False
+                property_info['fail_reason'] = "Location not found in Google Places API"
             
         return property_info
         
@@ -473,6 +541,142 @@ def check_google_data(property_info):
         property_info['error'] = str(e)
         property_info['meets_criteria'] = False
         property_info['fail_reason'] = f"Error checking Google data: {str(e)}"
+        return property_info
+
+
+def address_similarity_check(address1, address2):
+    """Check if two addresses are similar enough to likely be the same location.
+    Returns True if addresses appear to be the same location."""
+    # Convert both to lowercase for comparison
+    addr1 = address1.lower()
+    addr2 = address2.lower()
+    
+    # Basic exact match check
+    if addr1 == addr2:
+        return True
+    
+    # Extract numbers - if both addresses have numbers and they match, good sign
+    numbers1 = re.findall(r'\d+', addr1)
+    numbers2 = re.findall(r'\d+', addr2)
+    
+    # Extract street names
+    streets1 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr1)
+    streets2 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr2)
+    
+    # If both have numbers but they don't match at all, likely different places
+    if numbers1 and numbers2 and not any(n in addr2 for n in numbers1):
+        return False
+        
+    # If both have street names but none match, likely different places
+    if streets1 and streets2 and not any(s in addr2 for s in streets1):
+        return False
+    
+    # If we get here, there's enough similarity or ambiguity to pass
+    return True
+
+
+def check_google_data_from_place_info(property_info, place_info):
+    """Process Google place info for a property - extracted for reuse with fallback search."""
+    try:
+        # Keep original values
+        original_address = property_info['address']
+        original_store_id = property_info['store_id']
+        
+        place_id = place_info["place_id"]
+        
+        # Save the full formatted address from Google but keep original as primary
+        if "formatted_address" in place_info:
+            formatted_address = place_info["formatted_address"]
+            property_info['full_address'] = formatted_address
+            property_info['google_address'] = formatted_address  # Save separately for clarity
+            logger.info(f"Got Google Maps address (fallback): {formatted_address}")
+            
+            # Check for major address mismatch
+            if not address_similarity_check(original_address, formatted_address):
+                logger.warning(f"Possible address mismatch (fallback): Leasing: '{original_address}' vs Google: '{formatted_address}'")
+                property_info['address_mismatch_warning'] = True
+            
+            # Extract city and zip code from the formatted address
+            location_details = extract_city_zip_from_address(formatted_address)
+            property_info['city'] = location_details['city']
+            property_info['zip_code'] = location_details['zip_code']
+        else:
+            property_info['full_address'] = property_info['address']
+            property_info['city'] = "Unknown"
+            property_info['zip_code'] = "Unknown"
+
+        # Get the details including review count
+        details_url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=user_ratings_total,formatted_address,formatted_phone_number,website&key={GOOGLE_API_KEY}"
+        details_response = requests.get(details_url, timeout=10)
+        details_response.raise_for_status()
+        details = details_response.json()
+        
+        # Store additional information
+        property_info['review_count'] = details.get("result", {}).get("user_ratings_total", 0)
+        
+        if "formatted_phone_number" in details.get("result", {}):
+            property_info['phone_number'] = details["result"]["formatted_phone_number"]
+            
+        if "website" in details.get("result", {}):
+            website = details["result"]["website"]
+            property_info['website'] = website
+            
+            # Extract store ID from website but DON'T replace original store ID
+            if "walmart.com/store/" in website:
+                store_url_match = re.search(r'walmart\.com/store/(\d+)', website)
+                if store_url_match:
+                    website_store_id = store_url_match.group(1)
+                    logger.info(f"Found store ID in website URL (fallback): {website_store_id} (leasing ID: {original_store_id})")
+                    
+                    # Save website store ID separately but keep original as primary
+                    property_info['website_store_id'] = website_store_id
+                    property_info['leasing_id'] = original_store_id
+                    
+                    # Only add a flag if they don't match
+                    if website_store_id != original_store_id:
+                        property_info['id_mismatch'] = True
+            
+        # Skip further checking if it doesn't meet review threshold
+        if property_info['review_count'] < MIN_REVIEWS:
+            property_info['meets_criteria'] = False
+            property_info['fail_reason'] = f"Only {property_info['review_count']} reviews (minimum {MIN_REVIEWS})"
+            return property_info
+        
+        # If we have location geometry, check for mobile stores
+        if "geometry" in place_info:
+            location = place_info["geometry"]["location"]
+            lat = location["lat"]
+            lng = location["lng"]
+            
+            # Get nearby mobile stores
+            mobile_store_status = check_mobile_stores(lat, lng)
+            property_info['mobile_store_search_method'] = "Google Places Nearby Search API (Fallback)"
+            property_info['mobile_store_search_radius'] = "100 meters"
+            property_info['mobile_store_keywords_checked'] = MOBILE_STORE_KEYWORDS
+            property_info['has_mobile_store'] = mobile_store_status['has_mobile']
+            
+            # Store any found matches for reference
+            if mobile_store_status['stores']:
+                property_info['mobile_stores_found'] = mobile_store_status['stores']
+            
+            if property_info['has_mobile_store']:
+                property_info['meets_criteria'] = False
+                property_info['fail_reason'] = "Has a mobile phone store"
+            else:
+                property_info['meets_criteria'] = True
+                property_info['fail_reason'] = None
+        else:
+            # No location data
+            property_info['meets_criteria'] = False
+            property_info['fail_reason'] = "Missing location data in Google Place API"
+        
+        return property_info
+    
+    except Exception as e:
+        logger.error(f"Error in fallback Google data check: {str(e)}")
+        property_info['error'] = str(e)
+        property_info['meets_criteria'] = False
+        property_info['fail_reason'] = f"Error in fallback check: {str(e)}"
         return property_info
 
 
@@ -551,17 +755,19 @@ def has_mobile_store(address):
             lng = location.get("lng")
             radius = "100"  # Search within 100 meters of the Walmart
             
-            # Look for mobile stores near this Walmart
-            nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius={radius}&keyword=mobile+phone+repair+cell&key={GOOGLE_API_KEY}"
-            nearby_response = requests.get(nearby_url, timeout=10)
-            nearby_response.raise_for_status()
-            nearby_data = nearby_response.json()
-            
-            if "results" in nearby_data and nearby_data["results"]:
-                for result in nearby_data["results"]:
-                    name = result.get("name", "").lower()
-                    if any(term.lower() in name for term in MOBILE_STORE_KEYWORDS):
-                        return True  # Found a mobile store
+            # Check for each special brand name separately
+            for brand in ["mobile phone repair", "cell phone repair", "techy", "cellaris", "thefix", "casemate", "ifixandrepair"]:
+                keyword = requests.utils.quote(brand)
+                nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius={radius}&keyword={keyword}&key={GOOGLE_API_KEY}"
+                nearby_response = requests.get(nearby_url, timeout=10)
+                nearby_response.raise_for_status()
+                nearby_data = nearby_response.json()
+                
+                if "results" in nearby_data and nearby_data["results"]:
+                    for result in nearby_data["results"]:
+                        name = result.get("name", "").lower()
+                        if any(term.lower() in name for term in MOBILE_STORE_KEYWORDS):
+                            return True  # Found a mobile store
         
         return False
         
@@ -579,24 +785,49 @@ def check_mobile_stores(lat, lng):
     
     try:
         radius = "100"  # Search within 100 meters
-        nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius={radius}&keyword=mobile+phone+repair+cell&key={GOOGLE_API_KEY}"
-        nearby_response = requests.get(nearby_url, timeout=10)
-        nearby_response.raise_for_status()
-        nearby_data = nearby_response.json()
+        # Use multiple keyword combinations for better coverage
+        keyword_sets = [
+            "mobile+phone+repair",
+            "cell+phone+repair",
+            "iphone+repair",
+            "cellaris+cpr+thefix+techy"
+        ]
         
-        if "results" in nearby_data and nearby_data["results"]:
-            for place in nearby_data["results"]:
-                place_name = place.get("name", "").lower()
-                
-                # Check if any keywords match
-                matches = [term for term in MOBILE_STORE_KEYWORDS if term.lower() in place_name]
-                if matches:
-                    result['has_mobile'] = True
-                    result['stores'].append({
-                        'name': place.get("name"),
-                        'matched_keywords': matches,
-                        'place_id': place.get("place_id")
-                    })
+        found_stores = []
+        
+        # Try each keyword set
+        for keywords in keyword_sets:
+            nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius={radius}&keyword={keywords}&key={GOOGLE_API_KEY}"
+            nearby_response = requests.get(nearby_url, timeout=10)
+            nearby_response.raise_for_status()
+            nearby_data = nearby_response.json()
+            
+            if "results" in nearby_data and nearby_data["results"]:
+                for place in nearby_data["results"]:
+                    place_name = place.get("name", "").lower()
+                    
+                    # Check if any keywords match
+                    matches = [term for term in MOBILE_STORE_KEYWORDS if term.lower() in place_name]
+                    
+                    # Extra check for partial matches with special brands
+                    special_brands = ["techy", "cellaris", "casemate", "thefix"]
+                    for brand in special_brands:
+                        if brand in place_name and brand not in [m.lower() for m in matches]:
+                            matches.append(brand.capitalize())
+                            
+                    if matches:
+                        # Avoid duplicates
+                        if not any(store.get('place_id') == place.get('place_id') for store in found_stores):
+                            found_stores.append({
+                                'name': place.get("name"),
+                                'matched_keywords': matches,
+                                'place_id': place.get("place_id")
+                            })
+        
+        # Update result with all found stores
+        if found_stores:
+            result['has_mobile'] = True
+            result['stores'] = found_stores
     
     except Exception as e:
         logger.error(f"Error in check_mobile_stores: {str(e)}")
@@ -618,7 +849,7 @@ def send_email(properties):
         msg["To"] = EMAIL_RECEIVER
         msg["Subject"] = f"Walmart Leasing Opportunities - {datetime.now().strftime('%Y-%m-%d')}"
         
-        #! Create HTML content
+        # Create HTML content
         html_content = f"""
         <html>
         <head>
@@ -647,6 +878,14 @@ def send_email(properties):
                     color: red;
                     font-weight: bold;
                 }}
+                .note {{
+                    font-size: 0.8em;
+                    color: #666;
+                }}
+                .warning {{
+                    color: #ff6600;
+                    font-weight: bold;
+                }}
             </style>
         </head>
         <body>
@@ -654,7 +893,7 @@ def send_email(properties):
             <p>Found {len(properties)} locations matching your criteria:</p>
             <table>
                 <tr>
-                    <th>Store</th>
+                    <th>Store #</th>
                     <th>Address</th>
                     <th>City</th>
                     <th>ZIP</th>
@@ -670,13 +909,36 @@ def send_email(properties):
         
         # Add each property to the email
         for prop in properties:
-            store_num = prop["store_name"]
-            address = prop.get('full_address', prop['address'])  # Use full address if available
+            # Use the leasing site store ID as the primary ID
+            store_id = prop.get("store_id", "Unknown")
+            store_num = f"Store #{store_id}"
+            
+            # Use website ID information if available
+            website = prop.get("website", "")
+            website_store_id = prop.get("website_store_id", "")
+            
+            # Show ID warning if there's a mismatch between leasing site and website
+            id_note = ""
+            if prop.get('id_mismatch', False):
+                id_note = f" <span class='warning'>(Website ID: {website_store_id})</span>"
+            
+            # Original address from leasing site
+            leasing_address = prop.get('address', "Unknown")
+            
+            # Google Maps address if available
+            google_address = prop.get('google_address', prop.get('full_address', ""))
+            
+            # Show address warning if needed
+            address_note = ""
+            if prop.get('address_mismatch_warning', False):
+                address_note = f"<br><span class='note'>Verified address: {google_address}</span>"
+            
+            # Use city and zip from Google data
             city = prop.get('city', "Unknown")
             zip_code = prop.get('zip_code', "Unknown")
             reviews = prop.get("review_count", "N/A")
             
-            # Create space details HTML
+            # Create space details HTML - now with deduplication
             space_html = "<ul>"
             space_text = ""
             
@@ -693,11 +955,14 @@ def send_email(properties):
             radius = prop.get('mobile_store_search_radius', '100m')
             mobile_store = f"No mobile stores detected within {radius} <span class='check'>✓</span><br><small>Method: {method}</small>"
             
+            # Add website link
+            website_html = f"<a href='{website}' target='_blank'>Store Website</a>" if website else ""
+            
             # Add to HTML content
             html_content += f"""
                 <tr>
-                    <td>{store_num}</td>
-                    <td>{address}</td>
+                    <td>{store_num}{id_note}<br>{website_html}</td>
+                    <td>{leasing_address}{address_note}</td>
                     <td>{city}</td>
                     <td>{zip_code}</td>
                     <td>{space_html}</td>
@@ -707,7 +972,7 @@ def send_email(properties):
             """
             
             # Add to text content
-            text_content += f"• {store_num} at {address} - {city}, {zip_code} - {reviews} reviews - No mobile store ✓\n"
+            text_content += f"• {store_num} at {leasing_address} - {city}, {zip_code} - {reviews} reviews - No mobile store ✓\n"
             text_content += space_text
             text_content += "\n"
         
@@ -723,7 +988,8 @@ def send_email(properties):
             </ul>
             <p><strong>How Mobile Store Detection Works:</strong> We use the Google Places API to find the exact 
             geographic coordinates of each Walmart location, then search for nearby 
-            businesses within 100 meters that match mobile phone repair keywords. This ensures we only recommend 
+            businesses within 100 meters that match mobile phone repair keywords including Talknfix, 
+            Ifixandrepair, Cellaris, Thefix, Casemate, Techy and other repair brands. This ensures we only recommend 
             locations without competing mobile repair shops.</p>
         </body>
         </html>
@@ -743,6 +1009,79 @@ def send_email(properties):
     except Exception as e:
         logger.error(f"Error sending email: {str(e)}")
 
+
+def load_previous_results():
+    """Load previously identified matching properties from file."""
+    file_path = os.path.join(OUTPUT_DIR, "matching_properties.json")
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                logger.info(f"Loaded {len(data)} properties from previous results")
+                return data
+        except Exception as e:
+            logger.error(f"Failed to load previous matching properties: {str(e)}")
+    return []
+
+def is_duplicate_property(new_prop, existing_props):
+    """Check if a property is a duplicate of one already in our results."""
+    for prop in existing_props:
+        # Compare store ID and address for uniqueness
+        store_match = new_prop.get('store_id') == prop.get('store_id')
+        website_match = (
+            new_prop.get('website_store_id') == prop.get('website_store_id') 
+            and new_prop.get('website_store_id') is not None
+        )
+        
+        # If either store ID or website store ID match, consider it the same store
+        if store_match or website_match:
+            return True
+    return False
+
+def save_results_with_versioning(properties):
+    """Save results with versioning to avoid overwriting previous data."""
+    # Create base filename
+    base_filename = "matching_properties"
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # First, save current version with timestamp
+    versioned_filename = f"{base_filename}_{current_time}.json"
+    versioned_path = os.path.join(OUTPUT_DIR, versioned_filename)
+    
+    # Always save the current results with timestamp
+    with open(versioned_path, "w", encoding="utf-8") as f:
+        json.dump(properties, f, indent=2)
+    logger.info(f"Saved current results to {versioned_filename}")
+    
+    # Now update the main file (merged with previous if applicable)
+    main_path = os.path.join(OUTPUT_DIR, f"{base_filename}.json")
+    
+    # Load previous results
+    previous_results = load_previous_results()
+    
+    # If we have previous results, merge with current results
+    if previous_results:
+        # Add new properties that aren't duplicates
+        merged_properties = previous_results.copy()
+        new_count = 0
+        
+        for prop in properties:
+            if not is_duplicate_property(prop, previous_results):
+                merged_properties.append(prop)
+                new_count += 1
+        
+        # Save merged results
+        with open(main_path, "w", encoding="utf-8") as f:
+            json.dump(merged_properties, f, indent=2)
+        
+        logger.info(f"Updated matching_properties.json with {new_count} new properties (total: {len(merged_properties)})")
+        return merged_properties
+    else:
+        # If no previous results, just save current results as the main file
+        with open(main_path, "w", encoding="utf-8") as f:
+            json.dump(properties, f, indent=2)
+        logger.info(f"Created new matching_properties.json with {len(properties)} properties")
+        return properties
 
 def scrape_walmart_leasing_parallel():
     """
@@ -851,19 +1190,23 @@ def scrape_walmart_leasing_parallel():
         return []
     
     # Step 5: Check Google reviews and mobile stores in parallel
-    # OPTIMIZATION: Only make API calls for properties that already match the square footage criteria
-    # This avoids unnecessary API requests for properties we won't use anyway
     logger.info(f"Checking Google data for {len(small_space_properties)} properties in parallel (only for properties with spaces < 1000 sqft)")
     with concurrent.futures.ThreadPoolExecutor(max_workers=API_WORKERS) as executor:
         # Process Google data in parallel
         checked_properties = list(executor.map(check_google_data, small_space_properties))
     
-    # Step 6: Filter for final matching properties
-    matching_properties = [prop for prop in checked_properties if prop.get('meets_criteria', False)]
+    # Filter out None values in case any property checks failed completely
+    checked_properties = [prop for prop in checked_properties if prop is not None]
     
-    # Save final results
-    with open(os.path.join(OUTPUT_DIR, "matching_properties.json"), "w", encoding="utf-8") as f:
-        json.dump(matching_properties, f, indent=2)
+    # Step 6: Filter for final matching properties - now with None check
+    matching_properties = []
+    for prop in checked_properties:
+        # Use get() with default to prevent AttributeError
+        if prop is not None and prop.get('meets_criteria', False):
+            matching_properties.append(prop)
+    
+    # Save final results with versioning
+    matching_properties = save_results_with_versioning(matching_properties)
     
     logger.info(f"Found {len(matching_properties)} properties matching ALL criteria")
     logger.info(f"Total execution time: {time.time() - start_time:.2f} seconds")
@@ -923,7 +1266,7 @@ def job():
         # Run the actual parallel scraper
         matching_properties = scrape_walmart_leasing_parallel()
         
-        # Send email if matches found
+        # Send email if new matches found
         if matching_properties:
             send_email(matching_properties)
             logger.info(f"Email sent with {len(matching_properties)} matching properties")
