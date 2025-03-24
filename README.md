@@ -1,97 +1,79 @@
-# Walmart Leasing Space Checker
+# Advanced Walmart Leasing Space Checker
 
-This script automates the process of finding suitable retail spaces available at Walmart locations based on specific criteria.
+This tool scrapes the Walmart leasing website for available rental spaces under 1000 sqft, checks Google Maps for reviews and competing mobile stores, and sends email notifications about matching properties.
 
-## 🔍 What It Does
+## Features
 
-1. **Scrapes Walmart Leasing Page**: Extracts information about all available properties.
-2. **Applies Filters**:
-   - Spaces under 1000 sqft
-   - Locations with more than 10,000 Google reviews
-   - No mobile phone repair stores present
-3. **Sends Email Notifications**: When matching properties are found.
-4. **Runs on a Schedule**: Can be configured to check daily.
+- **Parallel processing** for faster scraping of Walmart leasing properties
+- **Direct Google Maps search** to check review counts and nearby mobile phone repair shops
+- **Email notifications** for properties that match criteria
+- **Scheduling** for daily automated runs
+- **Data versioning** to preserve historical findings
 
-## ✨ Features
+## Requirements
 
-- **Parallel Processing**: Uses multiple browser instances to scrape properties faster.
-- **API Integration**: Leverages Google Places API to check reviews and nearby businesses.
-- **Smart Filtering**: Optimized to minimize API calls by filtering square footage first.
-- **Fault Tolerance**: Handles errors gracefully and continues processing.
-- **Detailed Logging**: Tracks progress and helps troubleshoot issues.
+- Python 3.6+
+- Chrome browser
+- ChromeDriver (installed automatically via webdriver-manager)
 
-## 🛠️ Installation
+## Installation
 
-1. **Clone this repository**:
-   ```bash
-   git clone https://github.com/yourusername/walmart-leasing-checker.git
-   cd walmart-leasing-checker
-   ```
-
-2. **Install the required packages**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Configure settings**:
-   - Update email settings in `walmart_leasing_checker_parallel.py`
-   - Set your Google API key
-   - Adjust criteria as needed
-
-## 🚀 Usage
-
-### Basic Usage
+1. Clone this repository
+2. Install required packages:
 
 ```bash
-python walmart_leasing_checker_parallel.py
+pip install -r requirements.txt
 ```
 
-### Options
+3. Update configuration in `config.py` if needed
+
+## Usage
+
+Run the script with:
+
+```bash
+python main.py [options]
+```
+
+### Options:
 
 - `--test`: Run in test mode with sample data
-- `--quick`: Process only the first 300 properties (faster)
-- `--schedule`: Run once and then schedule daily execution
-- `--parallel N`: Use N parallel browser workers (default: 6)
-- `--help`: Display help information
+- `--schedule`: Run once and then schedule daily execution at 8:00 AM
+- `--quick`: Process only a limited number of properties (faster)
+- `--workers N`: Use N parallel browser workers (default: 15)
+- `--api N`: Use N parallel API/location check workers (default: 8)
 
-### Example
+### Performance Tips:
 
-```bash
-python walmart_leasing_checker_parallel.py --parallel 8 --schedule
-```
+- For faster scraping, increase the number of workers with `--workers 20`
+- For modern computers with good internet connections, 20-25 workers is usually optimal
+- If you experience crashes or errors, reduce the number of workers to 10-15
+- You can check progress in the log file `walmart_leasing_parallel.log`
 
-## 📋 Requirements
+## How It Works
 
-- Python 3.7+
-- Chrome browser installed
-- Internet connection
-- Google Places API key
-- SMTP-enabled email account
+1. **Scraping Phase**: The tool scrapes the Walmart leasing website to find properties with available spaces under 1000 sqft.
+2. **Verification Phase**: It then checks Google Maps to:
+   - Verify the property has over 10,000 reviews
+   - Ensure no mobile phone repair stores are nearby (within 100 meters)
+3. **Notification Phase**: Properties meeting all criteria are emailed to the configured recipient.
 
-## ⚙️ How It Works
+## Project Structure
 
-### Mobile Store Detection
+- `main.py`: Main entry point
+- `config.py`: Configuration settings
+- `scraper.py`: Walmart leasing site scraper
+- `location_checker.py`: Google Maps verification
+- `email_notifier.py`: Email notification system
+- `data_manager.py`: Data persistence
+- `selenium_utils.py`: Browser automation utilities
 
-The script identifies whether a Walmart location already has a mobile phone repair store by:
+## Output
 
-1. Using Google Places API to find the exact geographic coordinates of each Walmart store
-2. Searching for nearby businesses within a 100-meter radius using the `nearbysearch` endpoint
-3. Checking if any businesses match our keywords (CPR, TalknFix, mobile repair, etc.)
-4. Filtering out any Walmart locations that already have competing businesses
+Matching properties are saved in the `json_data` directory:
+- `matching_properties.json`: Current matches
+- `matching_properties_YYYYMMDD_HHMMSS.json`: Versioned historical data
 
-This process ensures you only receive notifications about locations where a mobile phone repair business would not have direct competition inside the same Walmart.
+## License
 
-### Data Processing Flow
-
-1. **Initial Setup**: The script loads the Walmart leasing page and counts available properties.
-2. **Parallel Processing**: It divides properties among multiple browser instances (15 by default).
-3. **Data Extraction**: Each worker extracts property details and space information.
-4. **Filtering**: Properties with spaces under 1000 sqft are identified.
-5. **API Verification**: For qualifying properties, it checks Google reviews and nearby businesses.
-6. **Notification**: Matching properties are saved to JSON and sent via email.
-
-## 🙏 Acknowledgements
-
-- Selenium for web automation
-- BeautifulSoup for HTML parsing
-- Google Places API for location data
+This project is for educational purposes only. Use responsibly and in accordance with website terms of service.
