@@ -40,6 +40,59 @@ def is_duplicate_property(new_prop, existing_props):
             return True
     return False
 
+def improve_property_data(merged_properties):
+    """
+    Improve property data by filling in missing information from other properties
+    with the same store ID or address.
+    """
+    # Create dictionaries to look up properties by ID and address
+    by_store_id = {}
+    by_website_id = {}
+    by_address = {}
+    
+    # First pass - build lookup dictionaries
+    for prop in merged_properties:
+        store_id = prop.get('store_id')
+        website_id = prop.get('website_store_id')
+        address = prop.get('address', '').lower()
+        
+        if store_id and store_id not in by_store_id:
+            by_store_id[store_id] = prop
+        
+        if website_id and website_id not in by_website_id:
+            by_website_id[website_id] = prop
+            
+        if address and address not in by_address:
+            by_address[address] = prop
+    
+    # Second pass - fill in missing information
+    for prop in merged_properties:
+        # Try to fill in city and zip if unknown
+        if prop.get('city') == 'Unknown' or prop.get('zip_code') == 'Unknown':
+            store_id = prop.get('store_id')
+            website_id = prop.get('website_store_id')
+            address = prop.get('address', '').lower()
+            
+            # Try to find another property with the same identifiers
+            match = None
+            if store_id and store_id in by_store_id and by_store_id[store_id] != prop:
+                match = by_store_id[store_id]
+            elif website_id and website_id in by_website_id and by_website_id[website_id] != prop:
+                match = by_website_id[website_id]
+            elif address and address in by_address and by_address[address] != prop:
+                match = by_address[address]
+            
+            if match:
+                if prop.get('city') == 'Unknown' and match.get('city') != 'Unknown':
+                    prop['city'] = match.get('city')
+                    prop['city_source'] = 'matched_property'
+                    
+                if prop.get('zip_code') == 'Unknown' and match.get('zip_code') != 'Unknown':
+                    prop['zip_code'] = match.get('zip_code')
+                    prop['zip_code_source'] = 'matched_property'
+    
+    return merged_properties
+
 def save_results_with_versioning(properties):
     """Save results with versioning to avoid overwriting previous data."""
     # Create base filename
@@ -71,6 +124,9 @@ def save_results_with_versioning(properties):
             if not is_duplicate_property(prop, previous_results):
                 merged_properties.append(prop)
                 new_count += 1
+        
+        # Improve the merged data
+        merged_properties = improve_property_data(merged_properties)
         
         # Save merged results
         with open(main_path, "w", encoding="utf-8") as f:

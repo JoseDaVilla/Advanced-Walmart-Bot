@@ -165,12 +165,33 @@ def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Usage: python main.py [options]")
         print("Options:")
-        print("  --test       Run in test mode with sample data")
-        print("  --schedule   Run once and then schedule daily execution")
-        print("  --quick      Process only a limited number of properties (faster)")
-        print("  --workers N  Use N parallel browser workers (default: 15)")
-        print("  --api N      Use N parallel API/location check workers (default: 8)")
+        print("  --test                  Run in test mode with sample data")
+        print("  --schedule              Run once and then schedule daily execution")
+        print("  --quick                 Process only a limited number of properties (faster)")
+        print("  --workers N             Use N parallel browser workers (default: 15)")
+        print("  --api N                 Use N parallel API/location check workers (default: 8)")
+        print("  --min-reviews N         Set minimum review count to N (default: 10000)")
+        print("  --debug-screenshots     Save screenshots for debugging")
         return
+    
+    # Check for min-reviews override
+    if "--min-reviews" in sys.argv:
+        try:
+            idx = sys.argv.index("--min-reviews")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+                min_reviews = int(sys.argv[idx + 1])
+                logger.info(f"Overriding minimum review count to {min_reviews}")
+                # Update the MIN_REVIEWS in config
+                import config
+                config.MIN_REVIEWS = min_reviews
+        except Exception as e:
+            logger.error(f"Error setting minimum reviews: {str(e)}")
+    
+    # Enable debug screenshots if requested
+    if "--debug-screenshots" in sys.argv:
+        global SAVE_DEBUG_SCREENSHOTS
+        SAVE_DEBUG_SCREENSHOTS = True
+        logger.info("Debug screenshots enabled")
     
     # Check if parallel workers specified
     global WEB_WORKERS

@@ -33,10 +33,21 @@ def setup_selenium_driver(headless=True, retries=3):
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
             
+            # Fix WebGL warnings
+            chrome_options.add_argument('--disable-webgl')
+            chrome_options.add_argument('--enable-unsafe-swiftshader')
+            chrome_options.add_argument('--ignore-gpu-blocklist')
+            
             # Connection reliability options
             chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-browser-side-navigation')
             chrome_options.add_argument('--dns-prefetch-disable')
+            
+            # Suppress console output
+            chrome_options.add_argument('--log-level=3')
+            chrome_options.add_argument('--silent')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
             
             # Randomize user agent to avoid blocking
             user_agents = [
