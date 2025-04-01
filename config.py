@@ -10,7 +10,7 @@ MAX_SPACE_SIZE = 1000
 MIN_REVIEWS = 10000
 
 # Keywords for mobile store detection
-MOBILE_STORE_KEYWORDS = ["CPR", "TalknFix", "iTalkandRepair", "mobile repair", "phone repair", 
+MOBILE_STORE_KEYWORDS = [ "TalknFix", "iTalkandRepair", "mobile repair", "phone repair", 
                         "cell phone", "cellular", "smartphone repair", "iphone repair", "wireless repair",
                         "Cell Phone Repair", "Ifixandrepair", "Cellaris", "Thefix", "Casemate", "Techy",
                         "iFixandRepair", "IFixAndRepair", "The Fix", "Case Mate", "CaseMate"]

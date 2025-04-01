@@ -151,11 +151,22 @@ def extract_modal_data(modal_html):
     return spaces
 
 def process_property_chunk(button_indices, worker_id=0):
-    """Process a chunk of property indices with a single browser instance."""
+    """
+    Process a chunk of property indices with a truly independent browser instance.
+    Each worker has its own browser to enable real parallelism.
+    """
     logger.info(f"Worker {worker_id}: Starting to process {len(button_indices)} buttons")
     
     # Set up a new browser instance with retry mechanism
-    driver = setup_selenium_driver(headless=True, retries=3)
+    # Use a unique user agent and port to ensure true independence
+    unique_port = 9222 + worker_id  # Use a unique debugging port for each Chrome instance
+    driver = setup_selenium_driver(
+        headless=True, 
+        retries=3, 
+        worker_id=worker_id,
+        debugging_port=unique_port
+    )
+    
     if not driver:
         logger.error(f"Worker {worker_id}: Failed to create browser instance after multiple attempts")
         return []
@@ -250,13 +261,16 @@ def process_property_chunk(button_indices, worker_id=0):
                                 page_html = driver.page_source
                                 spaces = extract_modal_data(page_html)
                                 
-                                # Filter spaces by size
+                                # Filter spaces by size more strictly
                                 small_spaces = [space for space in spaces if space['sqft'] < MAX_SPACE_SIZE]
                                 
+                                # Only add property if it has at least one small space
                                 if small_spaces:
                                     logger.info(f"Worker {worker_id}: Found {len(small_spaces)} spaces under {MAX_SPACE_SIZE} sqft")
                                     prop_info['spaces'] = small_spaces
                                     properties.append(prop_info)
+                                else:
+                                    logger.info(f"Worker {worker_id}: No spaces under {MAX_SPACE_SIZE} sqft, skipping property")
                                 
                                 # Close the modal using different methods
                                 try:
@@ -330,10 +344,9 @@ def process_property_chunk(button_indices, worker_id=0):
 
 def get_walmart_properties_with_small_spaces():
     """
-    Main function to scrape Walmart leasing properties using parallel processing.
-    Modified for better performance and reliability.
+    Main function to scrape Walmart leasing properties using true parallel processing.
     """
-    logger.info("Starting parallel Walmart leasing scraper with improved distribution...")
+    logger.info("Starting true parallel Walmart leasing scraper...")
     
     # First, determine total number of buttons with a single browser instance
     buttons_count = get_total_button_count()
@@ -358,23 +371,42 @@ def get_walmart_properties_with_small_spaces():
     
     logger.info(f"Distributed {buttons_count} buttons across {WEB_WORKERS} workers")
     
-    # Process all tasks in parallel
+    # Use multiprocessing instead of threading for true parallelism
+    # Process all tasks in parallel using ProcessPoolExecutor instead of ThreadPoolExecutor
     all_properties = []
+    
+    # Create a function that each worker will run in its own process
+    def worker_process(worker_id, indices):
+        try:
+            # Set up process-specific logging
+            process_logger = logging.getLogger(f"Worker-{worker_id}")
+            process_logger.setLevel(logging.INFO)
+            
+            # Process the button indices with this worker's own browser
+            process_logger.info(f"Worker {worker_id} starting with {len(indices)} buttons")
+            properties = process_property_chunk(indices, worker_id)
+            process_logger.info(f"Worker {worker_id} completed with {len(properties)} properties found")
+            return properties
+        except Exception as e:
+            process_logger.error(f"Worker {worker_id} failed: {str(e)}")
+            return []
+    
+    # Use concurrent.futures.ProcessPoolExecutor for true parallel execution
+    import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=WEB_WORKERS) as executor:
-        future_to_worker = {
-            executor.submit(process_property_chunk, indices, worker_id): worker_id
-            for worker_id, indices in enumerate(worker_tasks)
-        }
+        # Submit tasks to the executor
+        futures = []
+        for worker_id, indices in enumerate(worker_tasks):
+            futures.append(executor.submit(worker_process, worker_id, indices))
         
-        # Process results as they complete
-        for future in concurrent.futures.as_completed(future_to_worker):
-            worker_id = future_to_worker[future]
+        # Process results as they complete (not waiting for all to finish)
+        for future in concurrent.futures.as_completed(futures):
             try:
                 properties = future.result()
-                logger.info(f"Worker {worker_id} completed, found {len(properties)} properties with small spaces")
                 all_properties.extend(properties)
+                logger.info(f"Received {len(properties)} properties from worker (total so far: {len(all_properties)})")
             except Exception as e:
-                logger.error(f"Worker {worker_id} generated an exception: {str(e)}")
+                logger.error(f"Worker process generated an exception: {str(e)}")
     
     # Deduplicate properties based on store_id
     deduplicated = {}

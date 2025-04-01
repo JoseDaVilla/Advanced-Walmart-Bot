@@ -19,8 +19,8 @@ from config import PAGE_LOAD_TIMEOUT, SCRIPT_TIMEOUT
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def setup_selenium_driver(headless=True, retries=3):
-    """Set up and return a Selenium WebDriver with retry mechanism."""
+def setup_selenium_driver(headless=True, retries=3, worker_id=0, debugging_port=None):
+    """Set up and return a Selenium WebDriver with retry mechanism for true parallelism."""
     for attempt in range(retries):
         try:
             chrome_options = Options()
@@ -32,6 +32,16 @@ def setup_selenium_driver(headless=True, retries=3):
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
+            
+            # Use a unique user data directory for each worker
+            chrome_options.add_argument(f'--user-data-dir=/tmp/chrome-profile-{worker_id}')
+            
+            # Set a unique remote debugging port if specified
+            if debugging_port:
+                chrome_options.add_argument(f'--remote-debugging-port={debugging_port}')
+            
+            # Use a unique window name for each worker
+            chrome_options.add_argument(f'--window-name=worker-{worker_id}')
             
             # Fix WebGL warnings
             chrome_options.add_argument('--disable-webgl')
@@ -49,11 +59,11 @@ def setup_selenium_driver(headless=True, retries=3):
             chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Randomize user agent to avoid blocking
+            # Randomize user agent to avoid blocking, with worker ID to ensure uniqueness
             user_agents = [
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Worker/{worker_id}',
+                f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Worker/{worker_id}',
+                f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Worker/{worker_id}'
             ]
             chrome_options.add_argument(f'--user-agent={random.choice(user_agents)}')
             

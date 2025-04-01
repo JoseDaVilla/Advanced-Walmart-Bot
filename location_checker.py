@@ -10,7 +10,7 @@ import urllib.parse
 import concurrent.futures
 import random
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys  # Add Keys import
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
@@ -19,6 +19,10 @@ from config import MOBILE_STORE_KEYWORDS, MIN_REVIEWS, GOOGLE_MAPS_URL, SEARCH_R
 from selenium_utils import setup_selenium_driver
 
 logger = logging.getLogger(__name__)
+
+#* ================================================
+#* ========= EXTRACT CITY AND ZIP FROM ADDRESS ====
+#* ================================================
 
 def extract_city_zip_from_address(address):
     """Extract city and zip code from a formatted address string with better handling of different formats."""
@@ -70,38 +74,41 @@ def extract_city_zip_from_address(address):
         logger.error(f"Error extracting city/zip: {str(e)}")
         return {'city': "Unknown", 'zip_code': "Unknown"}
 
-def address_similarity_check(address1, address2):
-    #!  Check if two addresses are similar enough to likely be the same location. 
+#* ================================================
+#* ========= CHECK ADDRESS SIMILARITY =============
+#* ================================================
 
-    #? Convert both to lowercase for comparison
+def address_similarity_check(address1, address2):
+    """Check if two addresses are similar enough to likely be the same location."""
+    # Convert both to lowercase for comparison
     addr1 = address1.lower()
     addr2 = address2.lower()
     
     if addr1 == addr2:
         return True
     
-    #TODO Extract numbers - if both addresses have numbers and they match, good sign
-    
+    # Extract numbers - if both addresses have numbers and they match, good sign
     numbers1 = re.findall(r'\d+', addr1)
     numbers2 = re.findall(r'\d+', addr2)
     
-    #TODO Extract street names
-    
+    # Extract street names
     streets1 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr1)
     streets2 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr2)
     
-    #TODO If both have numbers but they don't match at all, likely different places
-    
+    # If both have numbers but they don't match at all, likely different places
     if numbers1 and numbers2 and not any(n in addr2 for n in numbers1):
         return False
         
-    #TODO If both have street names but none match, likely different places
-    
+    # If both have street names but none match, likely different places
     if streets1 and streets2 and not any(s in addr2 for s in streets1):
         return False
     
-    #? If we get here, there's enough similarity or ambiguity to pass
+    # If we get here, there's enough similarity or ambiguity to pass
     return True
+
+#* ================================================
+#* ========= EXTRACT REVIEW COUNT FROM PAGE ======
+#* ================================================
 
 def extract_review_count_from_page(driver, store_panel=None):
     """Extract review count from Google Maps page using multiple methods."""
@@ -210,11 +217,16 @@ def extract_review_count_from_page(driver, store_panel=None):
     
     return review_count
 
-def check_google_reviews_and_stores(property_info):
+#* ================================================
+#* ========= CHECK GOOGLE REVIEWS AND STORES ======
+#* ================================================
+
+def check_google_reviews_and_stores(property_info, worker_id=0):
     """
-    Check Google Maps for review counts and nearby mobile stores 
-    using direct web search instead of API.
+    Check Google Maps for review counts and nearby mobile stores.
+    Each call has a worker_id to ensure truly independent operation.
     """
+    # Use the worker_id to ensure this instance is completely independent
     # Keep original address and store ID
     original_address = property_info['address']
     store_id = property_info['store_id']
@@ -222,12 +234,15 @@ def check_google_reviews_and_stores(property_info):
     
     # Format search query with Walmart prefix exactly as recommended
     search_query = f"Walmart {store_number} {original_address}"
-    logger.info(f"Searching for: {search_query}")
+    logger.info(f"Worker {worker_id}: Searching for: {search_query}")
     
     # Add retries for Google Maps access
     max_retries = 3
     for attempt in range(max_retries):
-        driver = setup_selenium_driver(headless=True)
+        # Create a completely independent browser instance for this worker
+        unique_port = 9500 + worker_id + (attempt * 100)  # Ensure unique ports even across retries
+        driver = setup_selenium_driver(headless=True, worker_id=worker_id, debugging_port=unique_port)
+        
         if not driver:
             property_info['meets_criteria'] = False
             property_info['fail_reason'] = "Failed to create browser instance"
@@ -293,7 +308,7 @@ def check_google_reviews_and_stores(property_info):
                     property_info['city'] = "Unknown"
                     property_info['zip_code'] = "Unknown"
                 
-                # NEW: Extract review count using the specialized function
+                # Extract review count using the specialized function
                 review_count = extract_review_count_from_page(driver, store_panel)
                 property_info['review_count'] = review_count
                 
@@ -376,6 +391,10 @@ def check_google_reviews_and_stores(property_info):
         break
             
     return property_info
+
+#* ================================================
+#* ========= CHECK NEARBY MOBILE STORES ===========
+#* ================================================
 
 def check_nearby_mobile_stores(driver, property_info):
     """
@@ -629,6 +648,10 @@ def check_nearby_mobile_stores(driver, property_info):
     
     return result
 
+#* ================================================
+#* ========= PROCESS SEARCH RESULTS ===============
+#* ================================================
+
 def process_result_elements(driver, result_elements, found_stores=None):
     """Helper function to process search result elements and extract store information."""
     if found_stores is None:
@@ -692,76 +715,88 @@ def process_result_elements(driver, result_elements, found_stores=None):
                 
                 # Check if within our target radius
                 if distance_meters <= SEARCH_RADIUS_METERS * 1.5:  # Allow slightly wider radius to be safe
-                    # Check if matches any of our keywords
+                    # Check if matches any of our keywords - add "The Fix" to the manual check
                     store_name_lower = store_name.lower()
                     matches = [term for term in MOBILE_STORE_KEYWORDS 
                              if term.lower() in store_name_lower]
                     
-                    # Special manual keyword check
-                    manual_keywords = ["cell", "phone", "repair", "mobile", "fix", "wireless"]
-                    word_count = sum(1 for word in manual_keywords if word in store_name_lower)
+                    # Special manual keyword check - Note 'the fix' is included in MOBILE_STORE_KEYWORDS now
+                    manual_keywords = ["cell", "phone", "repair", "mobile", "fix", "wireless", "the fix"]
+                    word_count = sum(1 for word in manual_keywords if word.lower() in store_name_lower)
                     
-                    if matches or (word_count >= 2 and "repair" in store_name_lower):
+                    # Match if matches keywords or if has multiple repair-related keywords
+                    if matches or (word_count >= 2 and any(word in store_name_lower for word in ["repair", "fix"])):
                         matched_terms = matches if matches else ["keyword combination match"]
                         store_entry = {
                             'name': store_name,
                             'matched_keywords': matched_terms,
-                            'distance': f"{distance_val} {distance_unit}"
+                            'distance': f"{distance_val} {distance_unit}",
+                            'distance_meters': distance_meters  # Include actual meters for reference
                         }
                         
                         # Avoid duplicates
                         if not any(s.get('name') == store_name for s in found_stores):
                             found_stores.append(store_entry)
-                            logger.info(f"MATCH: {store_name} - {distance_val} {distance_unit}")
+                            logger.info(f"MATCH: {store_name} - {distance_val} {distance_unit} - located within {distance_meters} meters (threshold: {SEARCH_RADIUS_METERS * 1.5}m)")
             
         except Exception as e:
             logger.debug(f"Error processing a result: {str(e)}")
     
     return found_stores
 
+#* ================================================
+#* ========= RUN PARALLEL LOCATION CHECKS =========
+#* ================================================
+
 def check_locations_in_parallel(small_space_properties):
-    """Check Google Maps data for properties in parallel."""
+    """Check Google Maps data for properties in parallel with true independence."""
     logger.info(f"Checking Google Maps data for {len(small_space_properties)} properties in parallel")
     
     # Determine effective number of workers based on workload size
-    effective_workers = min(API_WORKERS, max(1, len(small_space_properties) // 50 + 1))
+    effective_workers = min(API_WORKERS, max(1, len(small_space_properties) // 10 + 1))
     if effective_workers < API_WORKERS:
         logger.info(f"Reducing number of workers to {effective_workers} due to workload size")
     
     checked_properties = []
     match_count = 0
-    batch_size = 50
+    
+    # Use smaller batch size for better distribution
+    batch_size = 10  # Smaller batch size for more even distribution
     total_batches = (len(small_space_properties) + batch_size - 1) // batch_size
     
+    # Create a function that each worker will run
+    def process_property_independently(property_info, worker_id):
+        try:
+            logger.info(f"Worker {worker_id}: Processing {property_info.get('store_number', 'Unknown')}")
+            result = check_google_reviews_and_stores(property_info, worker_id)
+            return result
+        except Exception as e:
+            logger.error(f"Worker {worker_id} error: {str(e)}")
+            property_info['meets_criteria'] = False
+            property_info['fail_reason'] = f"Processing error: {str(e)}"
+            return property_info
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
-        for batch_idx in range(total_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(small_space_properties))
-            batch = small_space_properties[start_idx:end_idx]
-            
-            logger.info(f"Processing batch {batch_idx+1}/{total_batches} ({start_idx}-{end_idx-1})")
-            
-            # Submit tasks for this batch
-            future_to_property = {
-                executor.submit(check_google_reviews_and_stores, prop): i 
-                for i, prop in enumerate(batch, start=start_idx)
-            }
-            
-            # Process results as they complete
-            for future in concurrent.futures.as_completed(future_to_property):
-                prop_idx = future_to_property[future]
-                try:
-                    result = future.result()
-                    if result:
-                        checked_properties.append(result)
-                        status = "MATCH" if result.get('meets_criteria') else "NO MATCH"
-                        if result.get('meets_criteria'):
-                            match_count += 1
-                            logger.info(f"Property {prop_idx+1}/{len(small_space_properties)}: {status} - {result.get('store_number')} - FOUND MATCH! ({match_count} matches so far)")
-                        else:
-                            reason = result.get('fail_reason', 'Unknown')
-                            logger.info(f"Property {prop_idx+1}/{len(small_space_properties)}: {status} - {result.get('store_number')} - Reason: {reason}")
-                except Exception as e:
-                    logger.error(f"Error processing property {prop_idx}: {str(e)}")
+        # Create a more efficient distribution - one property at a time to each worker
+        futures = []
+        for idx, prop in enumerate(small_space_properties):
+            worker_id = idx % effective_workers  # Distribute properties evenly across workers
+            futures.append(executor.submit(process_property_independently, prop, worker_id))
+        
+        # Process results as they complete
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    checked_properties.append(result)
+                    status = "MATCH" if result.get('meets_criteria') else "NO MATCH"
+                    if result.get('meets_criteria'):
+                        match_count += 1
+                        logger.info(f"Property {result.get('store_number', 'Unknown')}: {status} - FOUND MATCH! ({match_count} matches so far)")
+                    else:
+                        reason = result.get('fail_reason', 'Unknown')
+                        logger.info(f"Property {result.get('store_number', 'Unknown')}: {status} - Reason: {reason}")
+            except Exception as e:
+                logger.error(f"Error processing property result: {str(e)}")
     
     return checked_properties
