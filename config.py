@@ -13,7 +13,8 @@ MIN_REVIEWS = 10000
 MOBILE_STORE_KEYWORDS = [ "TalknFix", "iTalkandRepair", "mobile repair", "phone repair", 
                         "cell phone", "cellular", "smartphone repair", "iphone repair", "wireless repair",
                         "Cell Phone Repair", "Ifixandrepair", "Cellaris", "Thefix", "Casemate", "Techy",
-                        "iFixandRepair", "IFixAndRepair", "The Fix", "Case Mate", "CaseMate"]
+                        "iFixandRepair", "IFixAndRepair", "The Fix", "Case Mate", "CaseMate",
+                        "The fix", "IFix and repair", "Cellaris", "Talk N fix", "Techy"]
 
 # Email configuration
 EMAIL_SENDER = "testproject815@gmail.com"
