@@ -142,17 +142,18 @@ def send_email(properties):
             <ul>
                 <li>Available space under 1000 sqft</li>
                 <li>Over 10,000 Google reviews</li>
-                <li>No mobile phone repair stores present (checked with Google Maps)</li>
+                <li>No mobile phone repair stores present within 100 meters or at the same address as the Walmart</li>
                 <li>Must have verified city and ZIP code information</li>
             </ul>
-            <p><strong>How Mobile Store Detection Works:</strong> The system performs two searches for each Walmart location:</p>
+            <p><strong>How Mobile Store Detection Works:</strong> The system performs multiple checks for each Walmart location:</p>
             <ol>
-                <li>First, it uses Google Maps' "Nearby" feature directly from the Walmart location page to search for "mobile phone repair" within 100 meters</li>
-                <li>Then, it performs separate searches for "cell phone repair near [address]" and "mobile repair store near [address]" as a backup</li>
-                <li>All search results within 100 meters (expanded to 150m for safety) are analyzed for mobile repair keywords</li>
-                <li>Any stores matching keywords like "The Fix", "CPR", "Cellaris", etc. will cause the location to be filtered out</li>
+                <li>It uses Google Maps' "Nearby" feature directly from the Walmart location page to search for "mobile phone repair"</li>
+                <li>It performs separate searches for "cell phone repair near [address]" and "mobile repair store near [address]"</li>
+                <li>It performs targeted searches for specific brands ("The Fix", "iFixAndRepair", etc.) + the Walmart address</li>
+                <li>All search results are analyzed both for distance (within 150m) AND to detect if they're at the same address as the Walmart</li>
+                <li>Any stores matching targeted keywords (The Fix, iFixAndRepair, Cellaris, Talk N Fix, Techy, etc.) are flagged</li>
             </ol>
-            <p>This multi-stage approach ensures we detect both branded stores (like "The Fix") and small independent repair shops near Walmart locations.</p>
+            <p>This enhanced approach ensures we detect both standalone repair shops nearby AND services located within the Walmart itself.</p>
         </body>
         </html>
         """

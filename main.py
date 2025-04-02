@@ -92,8 +92,8 @@ def monitor_resources():
             
             time.sleep(5)
     
-    monitor_thread = threading.Thread(target=_monitor_thread)
-    monitor_thread.daemon = True
+    # FIXED: Set daemon=True to prevent blocking program exit
+    monitor_thread = threading.Thread(target=_monitor_thread, daemon=True)
     monitor_thread.start()
     
     return stop_monitor
@@ -272,8 +272,19 @@ def main():
         except Exception as e:
             logger.error(f"Error setting API worker count: {str(e)}")
     
-    # Run the job immediately
-    logger.info("Starting Walmart Leasing Space Checker (Parallel Version)")
+    # Run the job immediately - FIXED: Make sure no asyncio event loop is running
+    logger.info("Starting Walmart Leasing Space Checker (Playwright Version)")
+    
+    # ADDED: Check if there's an existing asyncio event loop
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            logger.warning("Detected running asyncio event loop - this may cause issues with Playwright")
+    except Exception:
+        pass
+    
+    # Run the main job
     job()
     
     # Schedule to run daily at 8:00 AM if requested

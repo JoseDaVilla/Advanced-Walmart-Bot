@@ -1,5 +1,6 @@
 """
 Core scraper functionality for Walmart leasing properties
+Using Playwright for browser automation
 """
 
 import re
@@ -7,16 +8,10 @@ import time
 import logging
 import concurrent.futures
 from bs4 import BeautifulSoup
-from selenium import webdriver  # Add this import for ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains  # Add this import
-from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from config import WALMART_LEASING_URL, MAX_SPACE_SIZE, WEB_WORKERS
-from selenium_utils import setup_selenium_driver, scroll_to_element, safe_click
+from playwright_utils import setup_playwright_browser, close_browser, wait_for_element, scroll_to_element, safe_click
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -158,18 +153,17 @@ def process_property_chunk(button_indices, worker_id=0):
     logger.info(f"Worker {worker_id}: Starting to process {len(button_indices)} buttons")
     
     # Set up a new browser instance with retry mechanism
-    # Use a unique user agent and port to ensure true independence
-    unique_port = 9222 + worker_id  # Use a unique debugging port for each Chrome instance
-    driver = setup_selenium_driver(
+    browser_info = setup_playwright_browser(
         headless=True, 
-        retries=3, 
-        worker_id=worker_id,
-        debugging_port=unique_port
+        retries=3,
+        worker_id=worker_id
     )
     
-    if not driver:
+    if not browser_info:
         logger.error(f"Worker {worker_id}: Failed to create browser instance after multiple attempts")
         return []
+    
+    page = browser_info["page"]
     
     properties = []
     retry_count = 0
@@ -178,15 +172,14 @@ def process_property_chunk(button_indices, worker_id=0):
     while retry_count < max_retries:
         try:
             # Load the Walmart leasing page
-            driver.get(WALMART_LEASING_URL)
+            page.goto(WALMART_LEASING_URL, wait_until="domcontentloaded")
             logger.info(f"Worker {worker_id}: Loaded Walmart leasing page (attempt {retry_count + 1})")
             
             # Wait for the page to load - looking specifically for property buttons
             try:
-                wait = WebDriverWait(driver, 30)  # Increased timeout
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'button.jss56')))
+                wait_for_element(page, 'button.jss56', timeout=30)
                 logger.info(f"Worker {worker_id}: Page loaded successfully")
-            except TimeoutException:
+            except PlaywrightTimeoutError:
                 logger.warning(f"Worker {worker_id}: Timeout waiting for page to load, retrying...")
                 retry_count += 1
                 continue
@@ -195,7 +188,7 @@ def process_property_chunk(button_indices, worker_id=0):
             time.sleep(5)
             
             # Find all property buttons
-            all_buttons = driver.find_elements(By.CSS_SELECTOR, 'button.jss56')
+            all_buttons = page.query_selector_all('button.jss56')
             button_count = len(all_buttons)
             
             # Verify we actually found buttons
@@ -219,97 +212,189 @@ def process_property_chunk(button_indices, worker_id=0):
                     
                     # Get a fresh reference to all buttons to avoid stale elements
                     if processed_button_count % 20 == 0:  # Refresh button list periodically
-                        all_buttons = driver.find_elements(By.CSS_SELECTOR, 'button.jss56')
+                        all_buttons = page.query_selector_all('button.jss56')
                         if len(all_buttons) == 0:
                             logger.warning(f"Worker {worker_id}: Buttons disappeared, refreshing page...")
-                            driver.refresh()
+                            page.reload(wait_until="domcontentloaded")
                             time.sleep(3)
-                            all_buttons = driver.find_elements(By.CSS_SELECTOR, 'button.jss56')
+                            all_buttons = page.query_selector_all('button.jss56')
                     
                     # Skip if button index is out of range after refresh
                     if idx >= len(all_buttons):
                         continue
                     
                     # Get the button at this index
+                    button = all_buttons[idx]
+                    
+                    # Scroll to make button visible
                     try:
-                        button = all_buttons[idx]
+                        button.scroll_into_view_if_needed()
+                        time.sleep(0.2)  # Brief pause after scrolling
+                    except Exception as e:
+                        logger.warning(f"Worker {worker_id}: Failed to scroll to button {idx}, skipping: {str(e)}")
+                        continue
+                    
+                    # Extract info from button before clicking
+                    try:
+                        button_html = button.inner_html()
+                        prop_info = extract_property_info(button_html)
                         
-                        # Scroll to make button visible
-                        try:
-                            scroll_to_element(driver, button)
-                            time.sleep(0.2)  # Brief pause after scrolling
-                        except:
-                            logger.warning(f"Worker {worker_id}: Failed to scroll to button {idx}, skipping")
+                        if not prop_info:
                             continue
+                            
+                        logger.info(f"Worker {worker_id}: Found property {prop_info['store_name']} with {prop_info['available_spaces']}")
                         
-                        # Extract info from button before clicking
+                        # Click the button to open modal with force:true and various fallbacks
                         try:
-                            button_html = button.get_attribute('outerHTML')
-                            prop_info = extract_property_info(button_html)
-                            
-                            if not prop_info:
-                                continue
-                                
-                            logger.info(f"Worker {worker_id}: Found property {prop_info['store_name']} with {prop_info['available_spaces']}")
-                            
-                            # Click the button to open modal
+                            # First attempt: force click with longer timeout
                             try:
-                                driver.execute_script("arguments[0].click();", button)
-                                time.sleep(1)  # Wait for modal
-                                
-                                # Extract space data from modal
-                                page_html = driver.page_source
-                                spaces = extract_modal_data(page_html)
-                                
-                                # Filter spaces by size more strictly
-                                small_spaces = [space for space in spaces if space['sqft'] < MAX_SPACE_SIZE]
-                                
-                                # Only add property if it has at least one small space
-                                if small_spaces:
-                                    logger.info(f"Worker {worker_id}: Found {len(small_spaces)} spaces under {MAX_SPACE_SIZE} sqft")
-                                    prop_info['spaces'] = small_spaces
-                                    properties.append(prop_info)
-                                else:
-                                    logger.info(f"Worker {worker_id}: No spaces under {MAX_SPACE_SIZE} sqft, skipping property")
-                                
-                                # Close the modal using different methods
+                                button.click(force=True, timeout=10000)
+                                logger.info(f"Force-clicked button for property {prop_info['store_name']}")
+                            except Exception as click_error:
+                                # Second attempt: Try JavaScript click
+                                logger.warning(f"Force click failed, trying JS click: {str(click_error)}")
                                 try:
-                                    # Try finding the close button first
-                                    close_buttons = driver.find_elements(By.CSS_SELECTOR, '.MuiSvgIcon-root path[d*="M19"]')
-                                    if close_buttons:
-                                        driver.execute_script("arguments[0].click();", close_buttons[0])
-                                    else:
-                                        # Try any SVG icon
-                                        svg_icons = driver.find_elements(By.CSS_SELECTOR, 'svg.MuiSvgIcon-root')
-                                        if svg_icons:
-                                            driver.execute_script("arguments[0].click();", svg_icons[0])
-                                        else:
-                                            # Last resort: press Escape key
-                                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                except:
-                                    # If all else fails, just press Escape
-                                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                                    page.evaluate("arguments[0].click()", button)
+                                    logger.info(f"JS-clicked button for property {prop_info['store_name']}")
+                                except Exception as js_error:
+                                    # Last attempt: dispatch click event
+                                    logger.warning(f"JS click failed, trying dispatch event: {str(js_error)}")
+                                    page.evaluate("""
+                                        (element) => {
+                                            const event = new MouseEvent('click', {
+                                                view: window,
+                                                bubbles: true,
+                                                cancelable: true
+                                            });
+                                            element.dispatchEvent(event);
+                                        }
+                                    """, button)
+                            
+                            # Wait for modal - more generous timeout
+                            time.sleep(2)  # Increased from 1s to 2s
+                            
+                            # Extract space data from modal
+                            page_html = page.content()
+                            spaces = extract_modal_data(page_html)
+                            
+                            # Filter spaces by size more strictly
+                            small_spaces = [space for space in spaces if space['sqft'] < MAX_SPACE_SIZE]
+                            
+                            # Only add property if it has at least one small space
+                            if small_spaces:
+                                logger.info(f"Worker {worker_id}: Found {len(small_spaces)} spaces under {MAX_SPACE_SIZE} sqft")
+                                prop_info['spaces'] = small_spaces
+                                properties.append(prop_info)
+                            else:
+                                logger.info(f"Worker {worker_id}: No spaces under {MAX_SPACE_SIZE} sqft, skipping property")
+                            
+                            # Close the modal with force click and advanced recovery
+                            try:
+                                # For closing the modal, try multiple approaches in sequence
+                                close_modal_success = False
                                 
-                                time.sleep(0.5)  # Wait for modal to close
+                                # Approach 1: Find close button by aria-label
+                                close_button = page.query_selector('button[aria-label="close"]')
+                                if close_button:
+                                    try:
+                                        close_button.click(force=True, timeout=5000)
+                                        close_modal_success = True
+                                        logger.info("Closed modal with direct button click")
+                                    except:
+                                        pass
                                 
-                            except Exception as e:
-                                logger.error(f"Worker {worker_id}: Error processing modal: {str(e)}")
-                                # Try to recover by pressing Escape
+                                # Approach 2: Use Escape key if the button click didn't work
+                                if not close_modal_success:
+                                    try:
+                                        page.keyboard.press('Escape')
+                                        time.sleep(0.5)
+                                        close_modal_success = True
+                                        logger.info("Closed modal with Escape key")
+                                    except:
+                                        pass
+                                        
+                                # Approach 3: Try JavaScript to find and click close button
+                                if not close_modal_success:
+                                    try:
+                                        # This JS will try to find any likely close button element and click it
+                                        page.evaluate("""
+                                            () => {
+                                                // Try various selectors for close buttons
+                                                const selectors = [
+                                                    'button[aria-label="close"]', 
+                                                    'button.MuiButtonBase-root svg',
+                                                    '.MuiDialog-root button',
+                                                    'button.MuiIconButton-root',
+                                                    'svg[data-testid="CloseIcon"]'
+                                                ];
+                                                
+                                                for(const selector of selectors) {
+                                                    const elements = document.querySelectorAll(selector);
+                                                    if(elements.length) {
+                                                        for(const el of elements) {
+                                                            // Try to find a close button by examining parent elements
+                                                            let current = el;
+                                                            for(let i = 0; i < 3; i++) {  // Check up to 3 levels up
+                                                                if(current && current.tagName === 'BUTTON') {
+                                                                    current.click();
+                                                                    return true;
+                                                                }
+                                                                current = current.parentElement;
+                                                            }
+                                                            
+                                                            // If we found an SVG, try clicking its parent
+                                                            if(el.tagName === 'svg' && el.parentElement) {
+                                                                el.parentElement.click();
+                                                                return true;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                // If all else fails, try to find buttons that might be close buttons
+                                                const buttons = document.querySelectorAll('button');
+                                                for(const btn of buttons) {
+                                                    const rect = btn.getBoundingClientRect();
+                                                    // Look for small buttons positioned in top-right corner
+                                                    if(rect.width < 50 && rect.height < 50 && rect.top < 100) {
+                                                        btn.click();
+                                                        return true;
+                                                    }
+                                                }
+                                                
+                                                return false;
+                                            }
+                                        """)
+                                        time.sleep(1)
+                                        logger.info("Attempted to close modal via JavaScript")
+                                    except:
+                                        pass
+                                        
+                                # Final approach: Just continue even if we couldn't close it
+                                logger.info("Continuing to next property...")
+                                
+                            except Exception as close_error:
+                                logger.warning(f"Error handling modal close: {str(close_error)}")
+                                # The most reliable fallback is just to press Escape
                                 try:
-                                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                    time.sleep(0.5)
+                                    page.keyboard.press('Escape')
                                 except:
                                     pass
                                     
-                        except StaleElementReferenceException:
-                            logger.warning(f"Worker {worker_id}: Stale element for button {idx}")
-                            continue
-                        except Exception as e:
-                            logger.error(f"Worker {worker_id}: Error extracting info from button {idx}: {str(e)}")
-                            continue
+                            # Wait a bit before continuing to next property
+                            time.sleep(1)  # Increased from 0.5s to 1s
                             
+                        except Exception as e:
+                            logger.error(f"Worker {worker_id}: Error processing modal: {str(e)}")
+                            # Try to recover by pressing Escape and continuing
+                            try:
+                                page.keyboard.press('Escape')
+                                time.sleep(1)
+                            except:
+                                pass
+                    
                     except Exception as e:
-                        logger.error(f"Worker {worker_id}: Error accessing button {idx}: {str(e)}")
+                        logger.error(f"Worker {worker_id}: Error extracting info from button {idx}: {str(e)}")
                         continue
                         
                     processed_button_count += 1
@@ -328,19 +413,66 @@ def process_property_chunk(button_indices, worker_id=0):
         except Exception as e:
             logger.error(f"Worker {worker_id}: Critical error in worker: {str(e)}")
             retry_count += 1
-            # Try to restart the browser if needed
-            try:
-                driver.quit()
-                driver = setup_selenium_driver(headless=True)
-            except:
-                pass
     
     # Clean up
-    if driver:
-        driver.quit()
+    close_browser(browser_info)
         
     logger.info(f"Worker {worker_id}: Completed with {len(properties)} properties found")
     return properties
+
+def get_total_button_count(max_retries=3):
+    """Get the total number of property buttons from the leasing page."""
+    browser_info = None
+    
+    for attempt in range(max_retries):
+        try:
+            browser_info = setup_playwright_browser(headless=True)
+            if not browser_info:
+                logger.error(f"Failed to create browser instance for button count (attempt {attempt + 1})")
+                time.sleep(5)
+                continue
+                
+            page = browser_info["page"]
+            
+            logger.info(f"Loading Walmart leasing page to count buttons (attempt {attempt + 1})")
+            page.goto(WALMART_LEASING_URL, wait_until="domcontentloaded")
+            
+            # Wait for page to load
+            try:
+                wait_for_element(page, 'button.jss56', timeout=30)
+            except PlaywrightTimeoutError:
+                logger.warning("Timeout waiting for buttons to load")
+                close_browser(browser_info)
+                browser_info = None
+                time.sleep(5)
+                continue
+                
+            # Extra wait to ensure all buttons are loaded
+            time.sleep(5)
+            
+            buttons = page.query_selector_all('button.jss56')
+            count = len(buttons)
+            
+            if count > 0:
+                logger.info(f"Found {count} total property buttons")
+                close_browser(browser_info)
+                return count
+                
+            logger.warning(f"No buttons found on attempt {attempt + 1}")
+            close_browser(browser_info)
+            browser_info = None
+            time.sleep(5)
+            
+        except Exception as e:
+            logger.error(f"Error counting buttons: {str(e)}")
+            if browser_info:
+                close_browser(browser_info)
+                browser_info = None
+            time.sleep(5)
+    
+    # If we get here, all attempts failed
+    logger.error("Failed to count buttons after all attempts")
+    return 0
 
 def get_walmart_properties_with_small_spaces():
     """
@@ -371,33 +503,15 @@ def get_walmart_properties_with_small_spaces():
     
     logger.info(f"Distributed {buttons_count} buttons across {WEB_WORKERS} workers")
     
-    # Use multiprocessing instead of threading for true parallelism
-    # Process all tasks in parallel using ProcessPoolExecutor instead of ThreadPoolExecutor
+    # Process all tasks in parallel using ThreadPoolExecutor
     all_properties = []
     
-    # Create a function that each worker will run in its own process
-    def worker_process(worker_id, indices):
-        try:
-            # Set up process-specific logging
-            process_logger = logging.getLogger(f"Worker-{worker_id}")
-            process_logger.setLevel(logging.INFO)
-            
-            # Process the button indices with this worker's own browser
-            process_logger.info(f"Worker {worker_id} starting with {len(indices)} buttons")
-            properties = process_property_chunk(indices, worker_id)
-            process_logger.info(f"Worker {worker_id} completed with {len(properties)} properties found")
-            return properties
-        except Exception as e:
-            process_logger.error(f"Worker {worker_id} failed: {str(e)}")
-            return []
-    
-    # Use concurrent.futures.ProcessPoolExecutor for true parallel execution
-    import concurrent.futures
+    # Use concurrent.futures.ThreadPoolExecutor for parallel execution
     with concurrent.futures.ThreadPoolExecutor(max_workers=WEB_WORKERS) as executor:
         # Submit tasks to the executor
         futures = []
         for worker_id, indices in enumerate(worker_tasks):
-            futures.append(executor.submit(worker_process, worker_id, indices))
+            futures.append(executor.submit(process_property_chunk, indices, worker_id))
         
         # Process results as they complete (not waiting for all to finish)
         for future in concurrent.futures.as_completed(futures):
@@ -420,51 +534,3 @@ def get_walmart_properties_with_small_spaces():
     logger.info(f"Found {len(deduplicated_properties)} unique properties with spaces under {MAX_SPACE_SIZE} sqft")
     
     return deduplicated_properties
-
-def get_total_button_count(max_retries=3):
-    """Get the total number of property buttons from the leasing page."""
-    for attempt in range(max_retries):
-        driver = setup_selenium_driver(headless=True)
-        if not driver:
-            logger.error(f"Failed to create browser instance for button count (attempt {attempt + 1})")
-            time.sleep(5)
-            continue
-            
-        try:
-            logger.info(f"Loading Walmart leasing page to count buttons (attempt {attempt + 1})")
-            driver.get(WALMART_LEASING_URL)
-            
-            # Wait for page to load
-            try:
-                wait = WebDriverWait(driver, 30)
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'button.jss56')))
-            except TimeoutException:
-                logger.warning("Timeout waiting for buttons to load")
-                driver.quit()
-                time.sleep(5)
-                continue
-                
-            # Extra wait to ensure all buttons are loaded
-            time.sleep(5)
-            
-            buttons = driver.find_elements(By.CSS_SELECTOR, 'button.jss56')
-            count = len(buttons)
-            
-            if count > 0:
-                logger.info(f"Found {count} total property buttons")
-                driver.quit()
-                return count
-                
-            logger.warning(f"No buttons found on attempt {attempt + 1}")
-            driver.quit()
-            time.sleep(5)
-            
-        except Exception as e:
-            logger.error(f"Error counting buttons: {str(e)}")
-            if driver:
-                driver.quit()
-            time.sleep(5)
-    
-    # If we get here, all attempts failed
-    logger.error("Failed to count buttons after all attempts")
-    return 0
