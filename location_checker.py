@@ -9,6 +9,7 @@ import logging
 import urllib.parse
 import concurrent.futures
 import random
+import os  # Added for screenshot paths
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from config import MOBILE_STORE_KEYWORDS, MIN_REVIEWS, GOOGLE_MAPS_URL, SEARCH_RADIUS_METERS, API_WORKERS
@@ -77,7 +78,7 @@ def extract_city_zip_from_address(address):
 def address_similarity_check(address1, address2):
     """
     Enhanced check if two addresses are similar enough to likely be the same location.
-    Now better detects stores inside Walmart with the same address.
+    Better detection of stores inside Walmart with differently formatted addresses.
     """
     # First convert both to lowercase and clean whitespace
     addr1 = address1.lower().strip()
@@ -88,63 +89,75 @@ def address_similarity_check(address1, address2):
     
     # Look for indicators that the store is inside Walmart
     inside_indicators = ["inside walmart", "inside the walmart", "#the fix", "# the fix", 
-                          "in walmart", "walmart supercenter", "in-store"]
-    for indicator in inside_indicators:
-        if indicator in addr1 or indicator in addr2:
-            # If one address has an inside indicator, extract core components from both
-            # Extract street numbers, street names, city, state, zip
-            numbers1 = re.findall(r'\b(\d+)\b', addr1)
-            numbers2 = re.findall(r'\b(\d+)\b', addr2)
-            
-            # Extract street name patterns
-            streets1 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr1)
-            streets2 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr2)
-            
-            # Extract zip codes
-            zip1 = re.findall(r'\b(\d{5})\b', addr1)
-            zip2 = re.findall(r'\b(\d{5})\b', addr2)
-            
-            # Extract city, state patterns
-            city_state1 = re.findall(r'([a-z\s]+),\s+([a-z]{2})', addr1)
-            city_state2 = re.findall(r'([a-z\s]+),\s+([a-z]{2})', addr2)
-            
-            # Check for matching components - if street number and ZIP match, it's likely the same location
-            if numbers1 and numbers2 and any(n in numbers2 for n in numbers1):
-                if (zip1 and zip2 and zip1[0] == zip2[0]) or (streets1 and streets2 and any(s in addr2 for s in streets1)):
-                    logger.info(f"Address similarity detected - likely inside Walmart - '{addr1}' vs '{addr2}'")
-                    return True
+                          "in walmart", "walmart supercenter", "in-store", "suite", "local"]
+                          
+    inside_walmart = any(indicator in addr1 or indicator in addr2 for indicator in inside_indicators)
     
-    # Original checks
-    numbers1 = re.findall(r'\b(\d+)\b', addr1)
-    numbers2 = re.findall(r'\b(\d+)\b', addr2)
-    
-    streets1 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr1)
-    streets2 = re.findall(r'([a-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|blvd|boulevard))', addr2)
-    
-    # Extract city names
-    city1 = re.search(r'([a-z\s]+),\s+[a-z]{2}', addr1)
-    city2 = re.search(r'([a-z\s]+),\s+[a-z]{2}', addr2)
-    
-    # Extract zip codes
+    # Extract key address components for comparison
+    # Extract ZIP codes (very reliable for matching)
     zip1 = re.search(r'\b(\d{5})\b', addr1)
     zip2 = re.search(r'\b(\d{5})\b', addr2)
     
-    # If both have numbers but they don't match at all, likely different places
-    if numbers1 and numbers2 and not any(n in numbers2 for n in numbers1):
-        return False
-        
-    # If both have street names but none match, likely different places
-    if streets1 and streets2 and not any(s in addr2 for s in streets1):
-        return False
+    # Extract cities
+    city1 = re.search(r'([a-z\s]+),\s+([a-z]{2}|\w+\s+rico)', addr1)
+    city2 = re.search(r'([a-z\s]+),\s+([a-z]{2}|\w+\s+rico)', addr2)
     
-    # If numbers match AND (zip codes match OR city names match), high probability of same location
-    if numbers1 and numbers2 and any(n in numbers2 for n in numbers1):
-        if (zip1 and zip2 and zip1.group(1) == zip2.group(1)) or (city1 and city2 and city1.group(1).strip() == city2.group(1).strip()):
-            logger.info(f"High confidence address match: '{addr1}' vs '{addr2}'")
+    city1_val = city1.group(1).strip() if city1 else ""
+    city2_val = city2.group(1).strip() if city2 else ""
+    
+    # If both addresses have ZIP codes and they match, very high probability of same location
+    if zip1 and zip2 and zip1.group(1) == zip2.group(1):
+        # Same ZIP code and city, almost certainly the same location
+        if city1_val and city2_val and (city1_val == city2_val or 
+                                       city1_val in city2_val or 
+                                       city2_val in city1_val):
+            logger.info(f"Same location detected: ZIP and city match between '{addr1}' and '{addr2}'")
+            return True
+        
+        # Same ZIP but different formatting of city names - could still be same place
+        # Especially for Puerto Rico addresses which often have different formatting
+        if "puerto rico" in addr1 and "puerto rico" in addr2:
+            logger.info(f"Same location detected in Puerto Rico: ZIP match between '{addr1}' and '{addr2}'")
+            return True
+        
+        # If one address has "walmart" in it and they share a ZIP, likely inside
+        if "walmart" in addr1 or "walmart" in addr2:
+            logger.info(f"Same location detected: ZIP match with Walmart address between '{addr1}' and '{addr2}'")
             return True
     
-    # If we get here, there's enough similarity or ambiguity to pass
-    return True
+    # Extract street numbers (reliable for matching when present)
+    street_nums1 = re.findall(r'\b(\d{1,5})\b', addr1)
+    street_nums2 = re.findall(r'\b(\d{1,5})\b', addr2)
+    
+    # If any street numbers match and city or ZIP matches, likely same location
+    if street_nums1 and street_nums2:
+        for num1 in street_nums1:
+            if num1 in street_nums2:
+                # Same street number, now check city or ZIP
+                if ((zip1 and zip2 and zip1.group(1) == zip2.group(1)) or 
+                    (city1_val and city2_val and (city1_val == city2_val or 
+                                              city1_val in city2_val or 
+                                              city2_val in city1_val))):
+                    logger.info(f"Same location detected: Street number and city/ZIP match between '{addr1}' and '{addr2}'")
+                    return True
+    
+    # Check for common road identifiers in Puerto Rico
+    pr_road_identifiers = ["carr", "carretera", "pr-", "km", "barrio", "calle", "ave", "avenida"]
+    if "puerto rico" in addr1 and "puerto rico" in addr2:
+        has_pr_road1 = any(identifier in addr1 for identifier in pr_road_identifiers)
+        has_pr_road2 = any(identifier in addr2 for identifier in pr_road_identifiers) 
+        
+        # If both addresses have PR road indicators and same ZIP/city, likely same location
+        if has_pr_road1 and has_pr_road2 and (
+            (zip1 and zip2 and zip1.group(1) == zip2.group(1)) or 
+            (city1_val and city2_val and city1_val == city2_val)):
+            logger.info(f"Puerto Rico address match detected: '{addr1}' and '{addr2}'")
+            return True
+    
+    # Original checks for other cases
+    # ... existing code ...
+    
+    return False
 
 #* ================================================
 #* ========= EXTRACT REVIEW COUNT FROM PAGE ======
@@ -159,7 +172,33 @@ def extract_review_count_from_page(page, store_panel_selector=None):
         if not store_panel_selector:
             store_panel_selector = 'div[role="main"], div.section-hero-header, .xtuJJ'
         
-        # Method 1: Look specifically for spans with aria-label containing "reseñas" or "reviews"
+        # IMPROVED METHOD 0: Take a screenshot for debugging review extraction issues
+        try:
+            screenshot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                        f"debug_reviews_{int(time.time())}.png")
+            page.screenshot(path=screenshot_path)
+        except Exception as ss_error:
+            logger.debug(f"Could not save screenshot: {str(ss_error)}")
+        
+        # Method 1: Direct text extraction from F7nice div (most reliable)
+        f7nice_element = page.query_selector('.F7nice')
+        if f7nice_element:
+            full_text = f7nice_element.inner_text()
+            logger.debug(f"F7nice text content: {full_text}")
+            
+            # Try to extract review count from parenthesized numbers
+            reviews_match = re.search(r'\(([0-9.,]+)\)', full_text)
+            if reviews_match:
+                review_str = reviews_match.group(1).replace('.', '').replace(',', '')
+                try:
+                    count = int(review_str)
+                    if count > review_count:
+                        review_count = count
+                        logger.info(f"Found review count from F7nice div: {review_count}")
+                except ValueError:
+                    pass
+
+        # Method 2: Look specifically for spans with aria-label containing "reseñas" or "reviews"
         aria_elements = page.query_selector_all('span[aria-label*="reseñas"], span[aria-label*="reviews"], span[aria-label*="reseña"]')
         
         for elem in aria_elements:
@@ -168,22 +207,20 @@ def extract_review_count_from_page(page, store_panel_selector=None):
             
             # Extract numeric value from aria-label text
             # Handle both formats: "11.958 reseñas" (Spanish) or "11,958 reviews" (English)
-            review_match = re.search(r'([\d.,]+)\s*(?:reseñas|reviews|reseña)', aria_text, re.IGNORECASE)
+            review_match = re.search(r'([\d.,]+)\s*(?:reseñas|reviews|review|reseñas|reseña)', aria_text, re.IGNORECASE)
             if review_match:
-                # Clean up number - replace both commas and periods with empty strings
-                # then convert to int (handles both European and US number formats)
                 review_str = review_match.group(1)
-                # For European format (11.958), keep only the last period/comma as decimal point
+                
+                # Normalize number format - both periods and commas could be thousand separators
+                # depending on locale
                 if '.' in review_str and ',' not in review_str:
-                    parts = review_str.split('.')
-                    if len(parts[-1]) == 3:  # If last part has 3 digits, it's likely a thousand separator
-                        review_str = ''.join(parts)  # Remove all periods
+                    if len(review_str.split('.')[-1]) == 3:  # If last part has 3 digits, it's a thousand separator
+                        review_str = review_str.replace('.', '')
                 elif ',' in review_str and '.' not in review_str:
-                    parts = review_str.split(',')
-                    if len(parts[-1]) == 3:  # If last part has 3 digits, it's likely a thousand separator
-                        review_str = ''.join(parts)  # Remove all commas
+                    if len(review_str.split(',')[-1]) == 3:  # If last part has 3 digits, it's a thousand separator
+                        review_str = review_str.replace(',', '')
                 else:
-                    # Just remove all separators
+                    # Handle more complex cases
                     review_str = review_str.replace(',', '').replace('.', '')
                 
                 try:
@@ -194,12 +231,12 @@ def extract_review_count_from_page(page, store_panel_selector=None):
                 except ValueError:
                     pass
         
-        # Method 2: Look for spans with parentheses containing numbers
+        # Method 3: Try to find any span with parenthesized numbers
         if review_count == 0:
-            review_spans = page.query_selector_all('.F7nice span span span, .fontBodyMedium span span span')
-            for span in review_spans:
+            all_spans = page.query_selector_all('span')
+            for span in all_spans:
                 span_text = span.inner_text().strip()
-                # Look for text like "(11.958)" - common format in Google Maps
+                # Look for text like "(11.958)" or "(11,958)" - common format in Google Maps
                 paren_match = re.match(r'^\(([0-9.,]+)\)$', span_text)
                 if paren_match:
                     review_str = paren_match.group(1).replace('.', '').replace(',', '')
@@ -210,45 +247,50 @@ def extract_review_count_from_page(page, store_panel_selector=None):
                             logger.info(f"Found review count from parentheses: {review_count}")
                     except ValueError:
                         pass
-                        
-        # Method 3: Check for aria-labels more generally by looking for spans in the F7nice div
+        
+        # Method 4: Try direct JavaScript evaluation for reviews
         if review_count == 0:
-            f7nice_elements = page.query_selector_all('.F7nice')
-            for elem in f7nice_elements:
-                # Find spans in this element
-                spans = elem.query_selector_all('span')
-                
-                for span in spans:
-                    # Skip rating spans (these will have aria-hidden="true")
-                    if span.get_attribute('aria-hidden') == 'true':
-                        continue
-                    
-                    # Look for review count spans
-                    aria_label = span.get_attribute('aria-label')
-                    if aria_label and ('reseñas' in aria_label.lower() or 'reviews' in aria_label.lower()):
-                        # Extract the number from the aria-label
-                        num_match = re.search(r'([\d.,]+)', aria_label)
-                        if num_match:
-                            review_str = num_match.group(1).replace('.', '').replace(',', '')
-                            try:
-                                count = int(review_str)
-                                if count > review_count:
-                                    review_count = count
-                                    logger.info(f"Found review count from F7nice: {review_count}")
-                            except ValueError:
-                                pass
-                    
-                    # Also check text content for parenthesized numbers
-                    span_text = span.inner_text().strip()
-                    if span_text and span_text.startswith('(') and span_text.endswith(')'):
-                        num_text = span_text[1:-1]  # Remove parentheses
-                        try:
-                            count = int(num_text.replace('.', '').replace(',', ''))
-                            if count > review_count:
-                                review_count = count
-                                logger.info(f"Found review count from span text: {review_count}")
-                        except ValueError:
-                            pass
+            try:
+                # Use JavaScript to find the review count in the DOM
+                review_js = """
+                    () => {
+                        // Try multiple methods to find reviews
+                        
+                        // Method 1: Look for spans with reviews in aria-label
+                        const reviewSpans = Array.from(document.querySelectorAll('span[aria-label*="review"]'));
+                        for (const span of reviewSpans) {
+                            const match = span.getAttribute('aria-label').match(/([\d.,]+)\\s*review/i);
+                            if (match) return match[1].replace(/[,.]/g, '');
+                        }
+                        
+                        // Method 2: Look for F7nice div with review count
+                        const f7nice = document.querySelector('.F7nice');
+                        if (f7nice) {
+                            const text = f7nice.textContent;
+                            const match = text.match(/\\(([\d.,]+)\\)/);
+                            if (match) return match[1].replace(/[,.]/g, '');
+                        }
+                        
+                        // Method 3: Look for any parenthesized numbers
+                        const allSpans = Array.from(document.querySelectorAll('span'));
+                        for (const span of allSpans) {
+                            const match = span.textContent.match(/^\\(([\d.,]+)\\)$/);
+                            if (match) return match[1].replace(/[,.]/g, '');
+                        }
+                        
+                        return "0";
+                    }
+                """
+                js_result = page.evaluate(review_js)
+                try:
+                    js_count = int(js_result)
+                    if js_count > review_count:
+                        review_count = js_count
+                        logger.info(f"Found review count via JavaScript: {review_count}")
+                except ValueError:
+                    pass
+            except Exception as js_error:
+                logger.debug(f"JavaScript review extraction failed: {str(js_error)}")
         
     except Exception as e:
         logger.error(f"Error extracting review count: {str(e)}")
@@ -458,6 +500,14 @@ def check_nearby_mobile_stores(browser_info, property_info):
     page = browser_info["page"]
     walmart_url = page.url
     walmart_address = property_info.get('full_address') or property_info.get('address')
+    
+    # Extract store ID for specific searches
+    store_id = property_info.get('store_id', '')
+    store_number = property_info.get('store_number', '')
+    
+    # Store critical information for better detection
+    store_city = property_info.get('city', '')
+    store_zip = property_info.get('zip_code', '')
     
     try:
         # Get current Walmart location URL
@@ -724,6 +774,63 @@ def check_nearby_mobile_stores(browser_info, property_info):
                 # Wait a bit between searches to avoid rate limits
                 time.sleep(1)
         
+        # ENHANCED APPROACH: Added specific direct searches for common store patterns
+        # Create specific searches for exact addresses and store formats
+        direct_searches = [
+            # Search for iFixandRepair at this specific store (CRITICALLY IMPORTANT)
+            f"iFixandRepair {store_number} {walmart_address}",
+            f"iFixandRepair Orlando Walmart {store_id}",
+            f"iFixandRepair inside Walmart {store_id}",
+            f"iFixandRepair at Walmart {store_id}",
+            
+            # Search for other common brand names at this specific Walmart
+            f"The Fix {store_number} {walmart_address}",
+            f"Cell Phone Repair {store_number} {walmart_address}",
+            f"Cellaris {store_number} {walmart_address}",
+            f"TalkNFix {store_number} {walmart_address}",
+            f"Techy {store_number} {walmart_address}",
+            
+            # Extremely specific search for this store
+            f"phone repair 8101 S John Young Pkwy Orlando",
+        ]
+        
+        # Add store city+zip searches
+        if store_city and store_zip:
+            direct_searches.extend([
+                f"iFixandRepair Walmart {store_city} {store_zip}",
+                f"The Fix Walmart {store_city} {store_zip}",
+                f"phone repair Walmart {store_city} {store_zip}"
+            ])
+        
+        logger.info(f"Adding {len(direct_searches)} specific searches for Walmart #{store_id}")
+        
+        # Execute these direct searches
+        for search_query in direct_searches:
+            encoded_query = urllib.parse.quote(search_query)
+            search_url = f"{GOOGLE_MAPS_URL}{encoded_query}"
+            
+            logger.info(f"Executing direct search: {search_query}")
+            
+            result_elements = safe_search_execution(search_url, f"direct search '{search_query}'")
+            
+            if result_elements:
+                logger.info(f"Found {len(result_elements)} results for direct search")
+                
+                # Process with extra sensitivity for matching
+                more_stores = process_result_elements(
+                    page, 
+                    result_elements, 
+                    [], 
+                    walmart_address,
+                    extra_sensitive=True,
+                    store_id=store_id
+                )
+                
+                # Add to overall found stores
+                for store in more_stores:
+                    if not any(s.get('name') == store.get('name') for s in found_stores):
+                        found_stores.append(store)
+        
         # Combined approach for all targeted and direct searches
         all_search_queries = []
         
@@ -843,205 +950,6 @@ def check_nearby_mobile_stores(browser_info, property_info):
     return result
 
 #* ================================================
-#* ========= PROCESS SEARCH RESULTS ===============
-#* ================================================
-
-def process_result_elements(page, result_elements, found_stores=None, walmart_address=None):
-    """
-    Helper function to process search result elements and extract store information.
-    Now also checks for stores within Walmart address.
-    """
-    if found_stores is None:
-        found_stores = []
-    
-    # Clean walmart address for better comparisons
-    clean_walmart_address = walmart_address.lower() if walmart_address else ""
-    
-    # Extract Walmart's address components for comparison
-    walmart_street_num = None
-    walmart_street_name = None
-    walmart_city = None
-    walmart_state = None
-    walmart_zip = None
-    
-    if walmart_address:
-        # Extract components using regex
-        street_num_match = re.search(r'\b(\d+)\b', clean_walmart_address)
-        walmart_street_num = street_num_match.group(1) if street_num_match else None
-        
-        # More extraction patterns similar to your existing code
-        # ... (similar to existing code)
-            
-    for idx, elem in enumerate(result_elements[:12]):  # Limit to first 12 for performance
-        try:
-            # Try multiple selectors for store name
-            name_selectors = ['h1', 'h2', 'h3', '.fontHeadlineSmall', '[role="heading"]', 'span.section-result-title']
-            store_name = None
-            
-            for selector in name_selectors:
-                name_elem = elem.query_selector(selector)
-                if name_elem:
-                    store_name = name_elem.inner_text().strip()
-                    break
-                    
-            if not store_name:
-                continue
-            
-            # Check for distance info with multiple selectors
-            distance_text = "Unknown"
-            distance_selectors = [
-                'span[aria-label*="miles"]', 
-                'span[aria-label*="mi"]',
-                'span.fontBodyMedium > span:nth-child(2)',
-                '.UY7F9'
-            ]
-            
-            for selector in distance_selectors:
-                distance_elem = elem.query_selector(selector)
-                if distance_elem:
-                    distance_text = distance_elem.inner_text().strip()
-                    break
-            
-            # Extract store address using improved validation
-            store_address = None
-            address_selectors = [
-                '.fontBodySmall[jsan*="address"]', 
-                '.fontBodyMedium > div[jsan*="address"]',
-                'div[class*="address"]',
-                'div[jscontroller*="address"]',
-                'div.W4Efsd > div.fontBodyMedium:nth-child(1)',
-                'div[aria-label*="address"]'
-            ]
-            
-            # Collect address candidates
-            address_candidates = []
-            for selector in address_selectors:
-                address_elems = elem.query_selector_all(selector)
-                for addr_elem in address_elems:
-                    text = addr_elem.inner_text().strip()
-                    if text and len(text) > 8:
-                        address_candidates.append(text)
-            
-            # Select best address candidate
-            for candidate in address_candidates:
-                # Skip if it looks like a review
-                if candidate.startswith('"') or candidate.endswith('"') or candidate.count('.') > 3:
-                    continue
-                    
-                # Skip if it's too long (likely a description)
-                if len(candidate) > 200:
-                    continue
-                    
-                # Detect if it looks like an address
-                address_indicators = [
-                    re.search(r'\d+\s+[A-Za-z]', candidate),  # Street number pattern
-                    re.search(r'(?:Ave|St|Rd|Dr|Blvd|Lane|Calle|Avenida|Carretera),?', candidate, re.IGNORECASE),  # Street suffix
-                    re.search(r'\b[A-Z]{2}\s+\d{5}\b', candidate),  # US ZIP code pattern
-                    re.search(r'\b\d{5}\b', candidate)  # Generic ZIP pattern
-                ]
-                
-                if any(address_indicators):
-                    store_address = candidate
-                    break
-            
-            # If no good candidate found, use shortest one
-            if not store_address and address_candidates:
-                store_address = min(address_candidates, key=len)
-            
-            # Log the store address if found
-            if store_address:
-                logger.info(f"Store address for '{store_name}': {store_address}")
-            
-            # Check for Walmart-owned services
-            is_walmart_owned_service = False
-            excluded_walmart_services = [
-                "walmart tech", "walmart electronics", "walmart cell phone services", 
-                "walmart wireless", "walmart service desk", "walmart photo center",
-                "walmart supercenter", "walmart electronics department"
-            ]
-            
-            if store_name and "walmart" in store_name.lower():
-                if any(service in store_name.lower() for service in excluded_walmart_services):
-                    if not any(repair_term in store_name.lower() for repair_term in ["repair", "fix", "iclinic"]):
-                        is_walmart_owned_service = True
-                        logger.info(f"Detected Walmart-owned service: '{store_name}' - Not a competing mobile store")
-            
-            # Skip Walmart's own services
-            if is_walmart_owned_service:
-                continue
-            
-            # Check for indicators of being inside Walmart
-            store_name_lower = store_name.lower() if store_name else ""
-            store_addr_lower = store_address.lower() if store_address else ""
-            
-            # Inside Walmart indicators
-            inside_walmart_indicators = [
-                "inside walmart", "in walmart", "walmart #", "walmart store", 
-                "walmart supercenter", "inside the walmart", "inside the store",
-                "#the fix", "# the fix", "in-store", "inside", "at walmart",
-                "walmart supercenter", "walmart center", "walmart location"
-            ]
-            
-            # Only consider "inside Walmart" with valid address
-            is_inside_walmart = False
-            has_valid_addresses = store_address and walmart_address and len(store_address) > 10
-            
-            if has_valid_addresses:
-                # Check for explicit indicators
-                for indicator in inside_walmart_indicators:
-                    if indicator in store_name_lower or indicator in store_addr_lower:
-                        if not (store_address.startswith('"') and store_address.endswith('"')):
-                            is_inside_walmart = True
-                            logger.info(f"Store '{store_name}' appears to be inside Walmart (indicator: '{indicator}')")
-                            break
-                
-                # Check address components for exact matches
-                if not is_inside_walmart:
-                    # Implementation similar to your existing code
-                    # ... (extracting store components and comparing them)
-                    pass
-            
-            # Extract distance value
-            distance_meters = None
-            distance_val = None
-            distance_unit = None
-            distance_match = re.search(r'([\d.]+)\s*(mi|km|m|ft)', distance_text)
-            if distance_match:
-                # Implementation similar to your existing code
-                # ... (distance conversion)
-                pass
-            
-            # Keyword matching logic
-            store_name_lower = store_name.lower()
-            matches = [term for term in MOBILE_STORE_KEYWORDS if term.lower() in store_name_lower]
-            
-            # Keyword counting
-            manual_keywords = ["cell", "phone", "repair", "mobile", "fix", "wireless", "device"]
-            word_count = sum(1 for word in manual_keywords if word.lower() in store_name_lower)
-            
-            # Detection flags
-            is_within_distance = distance_meters <= SEARCH_RADIUS_METERS * 1.5 if distance_meters is not None else False
-            is_keyword_match = len(matches) > 0
-            is_multi_keyword_match = (word_count >= 2 and any(word in store_name_lower for word in ["repair", "fix"]))
-            
-            # Final matching logic
-            if ((is_within_distance or is_inside_walmart) and (is_keyword_match or is_multi_keyword_match)):
-                # Implementation similar to your existing code
-                # ... (building store entry and adding to found_stores)
-                pass
-            
-            # Check for same address matches
-            elif (store_address and walmart_address and len(store_address) > 10):
-                # Implementation similar to your existing code
-                # ... (address-based matching logic)
-                pass
-            
-        except Exception as e:
-            logger.debug(f"Error processing a result: {str(e)}")
-    
-    return found_stores
-
-#* ================================================
 #* ========= RUN PARALLEL LOCATION CHECKS =========
 #* ================================================
 
@@ -1093,3 +1001,278 @@ def check_locations_in_parallel(small_space_properties):
                 logger.error(f"Error processing property result: {str(e)}")
     
     return checked_properties
+
+def process_result_elements(page, result_elements, found_stores=None, walmart_address=None, extra_sensitive=False, store_id=None):
+    """
+    Helper function to process search result elements and extract store information.
+    Improved detection for stores within Walmart address.
+    """
+    if found_stores is None:
+        found_stores = []
+    
+    # Clean walmart address for better comparisons
+    clean_walmart_address = walmart_address.lower() if walmart_address else ""
+    
+    # Extract detailed components from Walmart address for better comparison
+    walmart_addr_components = {}
+    if walmart_address:
+        # Extract city
+        city_match = re.search(r'([A-Za-z\s]+),\s+(?:\d{5},\s+)?(?:[A-Z]{2}|Puerto Rico)', walmart_address)
+        if city_match:
+            walmart_addr_components['city'] = city_match.group(1).strip().lower()
+        
+        # Extract ZIP code
+        zip_match = re.search(r'\b(\d{5})\b', walmart_address)
+        if zip_match:
+            walmart_addr_components['zip'] = zip_match.group(1)
+        
+        # Extract street number
+        street_num_match = re.search(r'\b(\d+)\b', clean_walmart_address)
+        if street_num_match:
+            walmart_addr_components['street_num'] = street_num_match.group(1)
+        
+        # Check if address contains suite/local info
+        suite_match = re.search(r'(?:suite|local|#)\s*([a-z0-9-]+)', clean_walmart_address, re.IGNORECASE)
+        if suite_match:
+            walmart_addr_components['suite'] = suite_match.group(1)
+            
+        # Extract state/territory
+        if "puerto rico" in clean_walmart_address:
+            walmart_addr_components['state'] = "puerto rico"
+    
+    # Define specific high-risk brands that are commonly found inside Walmart
+    HIGH_CONFIDENCE_IN_WALMART_BRANDS = [
+        "the fix", "thefix", "the-fix",
+        "ifix", "i-fix", "ifixandrepair", "i fix and repair", 
+        "cellaris", "cellairis",
+        "talk n fix", "talknfix", "talk-n-fix", 
+        "techy", "tech-y",
+        "mobile solution", "mobile solutions",
+        "experimax",
+        "gadget repair", "gadgets repair",
+        "wireless clinic", "wireless repair clinic"
+    ]
+    
+    for idx, elem in enumerate(result_elements[:15]):  # Search more results (15 instead of 12)
+        try:
+            # Try multiple selectors for store name
+            name_selectors = ['h1', 'h2', 'h3', '.fontHeadlineSmall', '[role="heading"]', 'span.section-result-title']
+            store_name = None
+            
+            for selector in name_selectors:
+                name_elem = elem.query_selector(selector)
+                if name_elem:
+                    store_name = name_elem.inner_text().strip()
+                    break
+                    
+            if not store_name:
+                continue
+            
+            # Check for distance info with multiple selectors
+            distance_text = "Unknown"
+            distance_selectors = [
+                'span[aria-label*="miles"]', 
+                'span[aria-label*="mi"]',
+                'span.fontBodyMedium > span:nth-child(2)',
+                '.UY7F9'
+            ]
+            
+            for selector in distance_selectors:
+                distance_elem = elem.query_selector(selector)
+                if distance_elem:
+                    distance_text = distance_elem.inner_text().strip()
+                    break
+            
+            # Extract store address
+            store_address = None
+            address_selectors = [
+                '.fontBodySmall[jsan*="address"]', 
+                '.fontBodyMedium > div[jsan*="address"]',
+                'div[class*="address"]',
+                'div[jscontroller*="address"]',
+                'div.W4Efsd > div.fontBodyMedium:nth-child(1)',
+                'div[aria-label*="address"]'
+            ]
+            
+            # Try to extract address
+            for selector in address_selectors:
+                address_elem = elem.query_selector(selector)
+                if address_elem:
+                    store_address = address_elem.inner_text().strip()
+                    if store_address and len(store_address) > 5:  # Ensure we have a meaningful address
+                        break
+            
+            # Skip if we couldn't find a name or address
+            if not store_name or not store_address:
+                continue
+            
+            store_name_lower = store_name.lower()
+            store_addr_lower = store_address.lower() if store_address else ""
+                
+            # Check if this is a high-confidence brand that's typically inside Walmart
+            is_high_confidence_brand = any(brand in store_name_lower.replace(" ", "") for brand in 
+                                         [b.replace(" ", "") for b in HIGH_CONFIDENCE_IN_WALMART_BRANDS])
+            
+            # Look for indicators this store is located inside Walmart
+            inside_walmart_indicators = [
+                "inside walmart", "in walmart", "walmart #", "walmart store", 
+                "walmart supercenter", "inside the walmart", "inside the store",
+                "the fix at walmart", "the fix walmart", "fix walmart", 
+                "inside", "at walmart", "walmart location", "ste", "suite" 
+            ]
+            
+            explicitly_inside_walmart = any(indicator in store_name_lower or indicator in store_addr_lower 
+                                         for indicator in inside_walmart_indicators)
+            
+            # Extract address components from store address
+            store_addr_components = {}
+            if store_address:
+                # City
+                city_match = re.search(r'([A-Za-z\s]+),\s+(?:\d{5},\s+)?(?:[A-Z]{2}|puerto rico)', 
+                                     store_addr_lower, re.IGNORECASE)
+                if city_match:
+                    store_addr_components['city'] = city_match.group(1).strip().lower()
+                
+                # ZIP code
+                zip_match = re.search(r'\b(\d{5})\b', store_addr_lower)
+                if zip_match:
+                    store_addr_components['zip'] = zip_match.group(1)
+                    
+                # Puerto Rico identifier
+                if "puerto rico" in store_addr_lower:
+                    store_addr_components['state'] = "puerto rico"
+            
+            # IMPROVED ADDRESS MATCHING LOGIC:
+            is_same_location = False
+            
+            # 1. Check for exact/similar address match
+            if walmart_address and store_address:
+                # Direct address match with the enhanced address_similarity_check
+                is_same_location = address_similarity_check(walmart_address, store_address)
+            
+            # 2. Check for ZIP and city match (very reliable indicators)
+            if ('zip' in walmart_addr_components and 'zip' in store_addr_components and
+                walmart_addr_components['zip'] == store_addr_components['zip']):
+                
+                # If we have matching ZIP codes and it's a high confidence brand, it's likely inside Walmart
+                if is_high_confidence_brand:
+                    is_same_location = True
+                    logger.warning(f"HIGH CONFIDENCE MATCH: '{store_name}' with matching ZIP code {store_addr_components['zip']}")
+                
+                # If in Puerto Rico, we confirm same location
+                elif ('state' in walmart_addr_components and 'state' in store_addr_components and
+                     walmart_addr_components['state'] == 'puerto rico' and store_addr_components['state'] == 'puerto rico'):
+                    is_same_location = True
+                    logger.info(f"Puerto Rico same location detected via ZIP match: '{store_address}' vs Walmart at '{walmart_address}'")
+                
+                # For other locations, check if cities match too
+                elif ('city' in walmart_addr_components and 'city' in store_addr_components and
+                     store_addr_components['city'] == walmart_addr_components['city']):
+                    is_same_location = True
+                    logger.info(f"Same location detected via ZIP and city match: '{store_address}' vs Walmart at '{walmart_address}'")
+            
+            # 3. Extra check for high confidence brands - if name matches and the store has the same city, it's likely inside
+            if (not is_same_location and is_high_confidence_brand and
+                'city' in walmart_addr_components and 'city' in store_addr_components and
+                walmart_addr_components['city'] == store_addr_components['city']):
+                is_same_location = True
+                logger.warning(f"HIGH CONFIDENCE BRAND in same city: '{store_name}' in {store_addr_components['city']}")
+            
+            # If we have a verified same location match, add this store
+            if is_same_location or explicitly_inside_walmart:
+                # Check if this is a mobile store (keyword match)
+                store_name_for_matching = store_name_lower.replace(" ", "").replace("-", "")
+                
+                # IMPROVED KEYWORD MATCHING: Check for variations of names without spaces/hyphens
+                matches = []
+                for keyword in MOBILE_STORE_KEYWORDS:
+                    normalized_keyword = keyword.lower().replace(" ", "").replace("-", "")
+                    if normalized_keyword in store_name_for_matching:
+                        matches.append(keyword)
+                
+                # Count mobile-related keywords
+                mobile_keywords = ["cell", "phone", "repair", "mobile", "fix", "wireless", "device"]
+                word_count = sum(1 for word in mobile_keywords if word.lower() in store_name_lower)
+                
+                # Special check for high-confidence brands
+                is_known_brand = any(brand.replace(" ", "") in store_name_for_matching 
+                                   for brand in HIGH_CONFIDENCE_IN_WALMART_BRANDS)
+                
+                # If we have keyword matches, multiple mobile terms + repair/fix, or it's a known brand, it's a mobile store
+                if matches or is_known_brand or (word_count >= 2 and any(word in store_name_lower for word in ["repair", "fix"])):
+                    store_entry = {
+                        'name': store_name,
+                        'address': store_address,
+                        'distance': "Same location - Inside Walmart",
+                        'keywords_matched': matches,
+                        'location_match': "exact_address",
+                        'location_confidence': "high",
+                        'is_known_brand': is_known_brand,
+                        'matching_method': "address_match"
+                    }
+                    found_stores.append(store_entry)
+                    logger.warning(f"FOUND MOBILE STORE AT SAME ADDRESS: '{store_name}' at '{store_address}'")
+                    
+                    # Enhanced logging
+                    if is_known_brand:
+                        logger.warning(f"HIGH CONFIDENCE BRAND DETECTED: {store_name}")
+            
+            # Handle nearby stores (not at the same address)
+            else:
+                # Extract distance value
+                distance_meters = None
+                try:
+                    distance_match = re.search(r'([\d.]+)\s*(mi|km|m|ft)', distance_text)
+                    if distance_match:
+                        distance_val = float(distance_match.group(1))
+                        distance_unit = distance_match.group(2)
+                        
+                        # Convert to meters for consistent comparison
+                        if distance_unit == 'mi':
+                            distance_meters = distance_val * 1609.34  # miles to meters
+                        elif distance_unit == 'km':
+                            distance_meters = distance_val * 1000  # km to meters
+                        elif distance_unit == 'ft':
+                            distance_meters = distance_val * 0.3048  # feet to meters
+                        else:  # assume meters
+                            distance_meters = distance_val
+                            
+                        # If store is nearby or is a high confidence brand, add it
+                        if distance_meters <= SEARCH_RADIUS_METERS * 1.5 or is_high_confidence_brand:
+                            # Check for mobile store keywords
+                            store_matches = []
+                            for keyword in MOBILE_STORE_KEYWORDS:
+                                if keyword.lower().replace(" ", "") in store_name_lower.replace(" ", ""):
+                                    store_matches.append(keyword)
+                                    
+                            # Only add if it matches known mobile repair keywords
+                            if store_matches or is_high_confidence_brand:
+                                store_entry = {
+                                    'name': store_name,
+                                    'address': store_address,
+                                    'distance': f"{distance_val} {distance_unit}",
+                                    'distance_meters': distance_meters,
+                                    'keywords_matched': store_matches,
+                                    'is_known_brand': is_high_confidence_brand
+                                }
+                                found_stores.append(store_entry)
+                                logger.warning(f"Found nearby mobile store: '{store_name}' at {distance_val} {distance_unit}")
+                                
+                except Exception:
+                    # If we can't extract distance but it's a high confidence brand, still consider it
+                    if is_high_confidence_brand:
+                        store_entry = {
+                            'name': store_name,
+                            'address': store_address,
+                            'distance': "Unknown distance",
+                            'keywords_matched': [],
+                            'is_known_brand': True,
+                            'high_risk': True
+                        }
+                        found_stores.append(store_entry)
+                        logger.warning(f"Found high-confidence brand with unknown distance: '{store_name}'")
+        
+        except Exception as e:
+            logger.debug(f"Error processing a result: {str(e)}")
+    
+    return found_stores

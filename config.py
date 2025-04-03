@@ -9,12 +9,20 @@ WALMART_LEASING_URL = "https://leasing.walmart.com/viewspaces"
 MAX_SPACE_SIZE = 1000  
 MIN_REVIEWS = 10000
 
-# Keywords for mobile store detection
-MOBILE_STORE_KEYWORDS = [ "TalknFix", "iTalkandRepair", "mobile repair", "phone repair", 
-                        "cell phone", "cellular", "smartphone repair", "iphone repair", "wireless repair",
-                        "Cell Phone Repair", "Ifixandrepair", "Cellaris", "Thefix", "Casemate", "Techy",
-                        "iFixandRepair", "IFixAndRepair", "The Fix", "Case Mate", "CaseMate",
-                        "The fix", "IFix and repair", "Cellaris", "Talk N fix", "Techy"]
+# Keywords for mobile store detection - EXPANDED with specific brands
+MOBILE_STORE_KEYWORDS = [ 
+    "TalknFix", "iTalkandRepair", "mobile repair", "phone repair", 
+    "cell phone", "cellular", "smartphone repair", "iphone repair", "wireless repair",
+    "Cell Phone Repair", "Ifixandrepair", "Cellaris", "Thefix", "Casemate", "Techy",
+    "iFixandRepair", "IFixAndRepair", "The Fix", "Case Mate", "CaseMate",
+    "The fix", "IFix and repair", "Cellaris", "Talk N fix", "Techy",
+    "PhoneFix", "iDoctor", "uBreakiFix", "iRepair",
+    "Experimax", "Gadget", "Experimac", "Device Pitstop",
+    "Wireless Clinic", "Mobile Solutions", "Cell Doc", "mobilerepair",
+    "phonerepair", "devicerepair", "smartphonerepair",
+    # Added variations for iFixandRepair that might be missed
+    "iFixRepair", "iFix and Repair", "i Fix", "i-Fix", "iFix Orlando"
+]
 
 # Email configuration
 EMAIL_SENDER = "testproject815@gmail.com"
