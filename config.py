@@ -21,7 +21,16 @@ MOBILE_STORE_KEYWORDS = [
     "Wireless Clinic", "Mobile Solutions", "Cell Doc", "mobilerepair",
     "phonerepair", "devicerepair", "smartphonerepair",
     # Added variations for iFixandRepair that might be missed
-    "iFixRepair", "iFix and Repair", "i Fix", "i-Fix", "iFix Orlando"
+    "iFixRepair", "iFix and Repair", "i Fix", "i-Fix", "iFix Orlando",
+    # Additional variations for commonly missed stores
+    "Asurion", "asurion tech repair", "asurion repair",
+    "CPR Cell Phone Repair", "CPR Phone Repair",
+    "iCare", "i Care", "iCare Repair",
+    "Simply Mac", "Simply Fix", 
+    "The Fix by Asurion", "Fix by Asurion",
+    "Tech Solutions", "Tech Bar", "Tech Corner",
+    "Walmart Tech Services", "Tech Services", "ImmedaTech",
+    "TechXpress", "Tech Xpress", "iParts", "i Parts", "iFix Solutions"
 ]
 
 # Email configuration

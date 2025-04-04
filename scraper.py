@@ -56,94 +56,129 @@ def extract_property_info(button_html):
     }
 
 def extract_modal_data(modal_html):
-    """Extract spaces information from modal HTML."""
+    """Extract spaces information from modal HTML with improved detection."""
     soup = BeautifulSoup(modal_html, 'html.parser')
     spaces = []
     
     # Find the modal content
     modal_content = soup.select_one('.MuiDialogContent-root') or soup
     
-    # Find all text blocks that look like spaces
-    space_patterns = [
-        # Pattern for "Suite XXX | YYY sqft"
-        r'Suite\s+([A-Za-z0-9-]+)\s*\|\s*(\d+)\s*(?:sq\s*ft|sqft)',
-        # Pattern for just "Suite XXX" followed by a separate "YYY sqft"
-        r'Suite\s+([A-Za-z0-9-]+)[\s\S]*?(\d+)\s*(?:sq\s*ft|sqft)',
-        # General pattern for any combination of suite and square footage
-        r'(?:Suite\s+)?([A-Za-z0-9-]+)[\s\r\n\t]*(?:[:|])?\s*(\d+)\s*(?:sq\s*ft|sqft)',
-    ]
+    # Log the full HTML for debugging
+    logger.debug(f"Processing modal HTML (length: {len(modal_html)})")
     
-    # Extract text content
-    modal_text = modal_content.get_text(separator=' ')
+    # IMPROVED APPROACH: First try to find data in the structured table format
+    tables = modal_content.select('table')
+    if tables:
+        for table in tables:
+            rows = table.select('tr')
+            for row in rows:
+                cells = row.select('td')
+                if len(cells) >= 2:
+                    # Extract suite number and square footage from table cells
+                    suite_text = cells[0].get_text().strip()
+                    sqft_text = cells[1].get_text().strip()
+                    
+                    # Process suite number (Suite 123 -> 123)
+                    suite_match = re.search(r'(?:Suite\s+)?(\w+)', suite_text)
+                    suite = suite_match.group(1) if suite_match else suite_text
+                    
+                    # Process square footage (1234 sqft -> 1234)
+                    sqft_match = re.search(r'(\d+)\s*(?:sq\.?ft\.?|sqft|SF)', sqft_text, re.IGNORECASE)
+                    if sqft_match:
+                        try:
+                            sqft = int(sqft_match.group(1))
+                            spaces.append({
+                                'suite': suite,
+                                'sqft': sqft,
+                                'text': f"Suite {suite} | {sqft} sqft"
+                            })
+                            logger.info(f"Found space from table: Suite {suite} = {sqft} sqft")
+                        except ValueError:
+                            pass
     
-    # Test each pattern in order of specificity
-    spaces_found = False
-    for pattern in space_patterns:
-        matches = re.findall(pattern, modal_text, re.IGNORECASE | re.MULTILINE)
-        if matches:
-            for suite, sqft in matches:
+    # If table approach failed, try various regex patterns on the full text
+    if not spaces:
+        # Extract text content with better line breaks preservation
+        modal_text = '\n'.join([p.get_text().strip() for p in modal_content.select('p')])
+        if not modal_text:
+            modal_text = modal_content.get_text(separator='\n')
+        
+        # IMPROVED PATTERNS: More accurately match suite information
+        space_patterns = [
+            # Exact pattern: "Suite XXX | YYY sqft"
+            r'Suite\s+(\w+)\s*\|\s*(\d{1,5})\s*(?:sq\.?ft\.?|SF|sqft)',
+            # Suite and sqft on same line with various separators
+            r'Suite\s+(\w+)[\s\:\|\-]+(\d{1,5})\s*(?:sq\.?ft\.?|SF|sqft)',
+            # Suite and sqft potentially on different lines
+            r'Suite\s+(\w+)[\s\S]{0,30}?(\d{1,5})\s*(?:sq\.?ft\.?|SF|sqft)',
+            # Just find numbers with sqft nearby (less accurate)
+            r'(\d+)[\s\:\|\-]+(\d{1,5})\s*(?:sq\.?ft\.?|SF|sqft)',
+        ]
+        
+        # Extract all potential spaces from the text
+        all_matches = []
+        for pattern in space_patterns:
+            matches = re.findall(pattern, modal_text, re.IGNORECASE | re.MULTILINE)
+            if matches:
+                logger.debug(f"Found {len(matches)} matches with pattern: {pattern}")
+                for match in matches:
+                    try:
+                        suite = match[0].strip()
+                        sqft = int(match[1].strip())
+                        all_matches.append((suite, sqft))
+                    except (ValueError, IndexError):
+                        pass
+        
+        # Convert matches to spaces
+        for suite, sqft in all_matches:
+            # Basic validation
+            if 50 <= sqft <= 10000 and suite:  
+                spaces.append({
+                    'suite': suite,
+                    'sqft': sqft,
+                    'text': f"Suite {suite} | {sqft} sqft"
+                })
+                logger.debug(f"Found space: Suite {suite} = {sqft} sqft")
+    
+    # Third approach: Try to find information from Walmart's modal structure
+    if not spaces:
+        # Look for div elements that might contain space information
+        space_divs = modal_content.select('div.space-info, div.jss123, div.jss234, div.space-details')
+        for div in space_divs:
+            div_text = div.get_text().strip()
+            suite_match = re.search(r'Suite\s+(\w+)', div_text, re.IGNORECASE)
+            sqft_match = re.search(r'(\d{1,5})\s*(?:sq\.?ft\.?|SF|sqft)', div_text, re.IGNORECASE)
+            
+            if suite_match and sqft_match:
                 try:
+                    suite = suite_match.group(1)
+                    sqft = int(sqft_match.group(1))
                     spaces.append({
-                        'suite': suite.strip(),
-                        'sqft': int(sqft.strip()),
+                        'suite': suite,
+                        'sqft': sqft,
                         'text': f"Suite {suite} | {sqft} sqft"
                     })
-                    spaces_found = True
-                except (ValueError, AttributeError):
-                    continue
-            
-            # If we found spaces with this pattern, stop trying others
-            if spaces_found:
-                logger.info(f"Found {len(spaces)} spaces using pattern: {pattern}")
-                break
-    
-    # If we didn't find spaces with regular expressions, try HTML structure
-    if not spaces:
-        # Look for suite info in paragraphs, spans, or divs
-        for element in modal_content.select('p, span, div'):
-            text = element.get_text().strip()
-            if 'suite' in text.lower() and ('sqft' in text.lower() or 'sq ft' in text.lower()):
-                # Extract suite number and square footage
-                suite_match = re.search(r'Suite\s+([A-Za-z0-9-]+)', text, re.IGNORECASE)
-                sqft_match = re.search(r'(\d+)\s*(?:sq\s*ft|sqft)', text, re.IGNORECASE)
-                
-                if suite_match and sqft_match:
-                    suite = suite_match.group(1)
-                    sqft = int(sqft_match.group(1))
-                    spaces.append({
-                        'suite': suite,
-                        'sqft': sqft,
-                        'text': text
-                    })
-    
-    # Try one more method: look for lines with both 'Suite' and square footage
-    if not spaces:
-        lines = modal_text.split('\n')
-        for line in lines:
-            if 'suite' in line.lower() and any(s in line.lower() for s in ['sqft', 'sq ft']):
-                suite_match = re.search(r'Suite\s+([A-Za-z0-9-]+)', line, re.IGNORECASE)
-                sqft_match = re.search(r'(\d+)\s*(?:sq\s*ft|sqft)', line, re.IGNORECASE)
-                
-                if suite_match and sqft_match:
-                    suite = suite_match.group(1)
-                    sqft = int(sqft_match.group(1))
-                    spaces.append({
-                        'suite': suite,
-                        'sqft': sqft,
-                        'text': line.strip()
-                    })
+                except (ValueError, IndexError):
+                    pass
     
     # Deduplicate spaces based on suite numbers
     if spaces:
         unique_spaces = {}
         for space in spaces:
-            suite = space.get('suite')
-            if suite not in unique_spaces or space.get('sqft', 0) < unique_spaces[suite].get('sqft', 9999):
+            suite = space['suite']
+            if suite not in unique_spaces or space['sqft'] < unique_spaces[suite]['sqft']:
                 unique_spaces[suite] = space
-        
         spaces = list(unique_spaces.values())
     
-    return spaces
+    # Extra validation and logging
+    if spaces:
+        spaces = [s for s in spaces if 50 <= s.get('sqft', 0) <= 10000]
+        logger.info(f"Found {len(spaces)} valid spaces: {[(s['suite'], s['sqft']) for s in spaces]}")
+    else:
+        logger.warning("Could not extract any valid spaces from modal")
+    
+    # Return spaces sorted by suite number for consistency
+    return sorted(spaces, key=lambda x: x.get('suite', ''))
 
 def process_property_chunk(button_indices, worker_id=0):
     """

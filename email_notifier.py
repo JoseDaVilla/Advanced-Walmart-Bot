@@ -24,14 +24,18 @@ def send_email(properties):
         msg["To"] = EMAIL_RECEIVER
         msg["Subject"] = f"Walmart Leasing Opportunities - {datetime.now().strftime('%Y-%m-%d')}"
         
-        # Create HTML content
+        # Create HTML content with improved table structure
         html_content = f"""
         <html>
         <head>
             <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                }}
                 table {{
                     border-collapse: collapse;
                     width: 100%;
+                    margin-bottom: 20px;
                 }}
                 th, td {{
                     border: 1px solid #dddddd;
@@ -61,6 +65,10 @@ def send_email(properties):
                     color: #ff6600;
                     font-weight: bold;
                 }}
+                .space-list {{
+                    margin: 0;
+                    padding-left: 15px;
+                }}
             </style>
         </head>
         <body>
@@ -72,9 +80,9 @@ def send_email(properties):
                     <th>Address</th>
                     <th>City</th>
                     <th>ZIP</th>
-                    <th>Spaces</th>
+                    <th>Available Spaces</th>
                     <th>Reviews</th>
-                    <th>Mobile Store</th>
+                    <th>Status</th>
                 </tr>
         """
         
@@ -82,7 +90,7 @@ def send_email(properties):
         text_content = "Walmart Leasing Opportunities\n\n"
         text_content += f"Found {len(properties)} locations matching your criteria:\n\n"
         
-        # Add each property to the email
+        # Add each property to the email with improved space formatting
         for prop in properties:
             # Use the leasing site store ID as the primary ID
             store_id = prop.get("store_id", "Unknown")
@@ -100,14 +108,14 @@ def send_email(properties):
             website = prop.get("website", "")
             website_html = f"<br><a href='{website}' target='_blank'>Website</a>" if website else ""
             
-            # Create space details HTML
-            space_html = "<ul>"
+            # Create space details HTML - improved formatting with bullet points
+            space_html = "<ul class='space-list'>"
             space_text = ""
             
-            for space in prop.get("spaces", []):
+            for space in sorted(prop.get("spaces", []), key=lambda x: x.get('sqft', 0)):
                 suite = space.get("suite", "TBD")
                 sqft = space.get("sqft", "Unknown")
-                space_html += f"<li>Suite {suite}: {sqft} sqft</li>"
+                space_html += f"<li><strong>Suite {suite}</strong>: {sqft} sqft</li>"
                 space_text += f"- Suite {suite}: {sqft} sqft\n"
             
             space_html += "</ul>"
@@ -116,15 +124,15 @@ def send_email(properties):
             radius = prop.get('mobile_store_search_radius', '100m')
             mobile_store = f"No mobile stores detected within {radius} <span class='check'>&check;</span>"
             
-            # Add to HTML content - Removed website ID display
+            # Add to HTML content with improved layout
             html_content += f"""
                 <tr>
-                    <td>{store_num}{website_html}</td>
+                    <td><strong>{store_num}</strong>{website_html}</td>
                     <td>{leasing_address}</td>
                     <td>{city}</td>
                     <td>{zip_code}</td>
                     <td>{space_html}</td>
-                    <td>{reviews}</td>
+                    <td>{reviews:,}</td>
                     <td>{mobile_store}</td>
                 </tr>
             """
