@@ -1,6 +1,7 @@
 """
-Data management for Walmart Leasing Checker
-Handles loading, saving and versioning of property data
+Data management for Walmart Leasing Checker.
+This module handles loading, saving and versioning of property data to maintain
+historical records and enable comparison over time.
 """
 
 import os
@@ -13,7 +14,12 @@ from config import OUTPUT_DIR
 logger = logging.getLogger(__name__)
 
 def load_previous_results():
-    """Load previously identified matching properties from file."""
+    """
+    Load previously identified matching properties from file.
+    
+    Returns:
+        list: Previously identified matching properties or empty list if none found
+    """
     file_path = os.path.join(OUTPUT_DIR, "matching_properties.json")
     if os.path.exists(file_path):
         try:
@@ -26,7 +32,16 @@ def load_previous_results():
     return []
 
 def is_duplicate_property(new_prop, existing_props):
-    """Check if a property is a duplicate of one already in our results."""
+    """
+    Check if a property is a duplicate of one already in our results.
+    
+    Args:
+        new_prop (dict): New property to check
+        existing_props (list): List of existing properties
+        
+    Returns:
+        bool: True if the property is a duplicate, False otherwise
+    """
     for prop in existing_props:
         # Compare store ID and address for uniqueness
         store_match = new_prop.get('store_id') == prop.get('store_id')
@@ -44,6 +59,12 @@ def improve_property_data(merged_properties):
     """
     Improve property data by filling in missing information from other properties
     with the same store ID or address.
+    
+    Args:
+        merged_properties (list): List of merged properties
+        
+    Returns:
+        list: Improved property data with missing information filled in
     """
     # Create dictionaries to look up properties by ID and address
     by_store_id = {}
@@ -94,7 +115,15 @@ def improve_property_data(merged_properties):
     return merged_properties
 
 def save_results_with_versioning(properties):
-    """Save results with versioning to avoid overwriting previous data."""
+    """
+    Save results with versioning to avoid overwriting previous data.
+    
+    Args:
+        properties (list): List of properties to save
+        
+    Returns:
+        list: Merged properties (current + previous non-duplicate)
+    """
     # Create base filename
     base_filename = "matching_properties"
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -142,7 +171,13 @@ def save_results_with_versioning(properties):
         return properties
 
 def save_intermediate_results(properties, filename):
-    """Save intermediate results for debugging or analysis."""
+    """
+    Save intermediate results for debugging or analysis.
+    
+    Args:
+        properties (list): List of properties to save
+        filename (str): Filename to save to
+    """
     file_path = os.path.join(OUTPUT_DIR, filename)
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(properties, f, indent=2)

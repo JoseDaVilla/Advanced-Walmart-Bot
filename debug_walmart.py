@@ -1,11 +1,13 @@
 """
-Debug script to check a specific Walmart store for mobile stores
+Debug script to check a specific Walmart store for mobile stores.
+This module allows you to run targeted checks on individual Walmart locations to verify
+mobile store detection and troubleshoot any issues.
 """
 
 import sys
 import logging
 import time
-import urllib.parse  # Added import at the top level
+import urllib.parse
 from config import GOOGLE_MAPS_URL
 from playwright_utils import setup_playwright_browser, close_browser
 from location_checker import process_result_elements, extract_city_zip_from_address
@@ -20,7 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 def debug_store(store_id, address=None):
-    """Debug a specific Walmart store to see if mobile stores are detected."""
+    """
+    Debug a specific Walmart store to see if mobile stores are detected.
+    
+    Args:
+        store_id (str): The Walmart store ID to check
+        address (str, optional): The address of the Walmart, if known
+    """
     logger.info(f"Debugging Walmart Store #{store_id}")
 
     browser_info = setup_playwright_browser(headless=True)
@@ -130,8 +138,6 @@ def debug_store(store_id, address=None):
 
 
 if __name__ == "__main__":
-    # No need to import urllib.parse here since it's imported at the top
-
     if len(sys.argv) < 2:
         print("Usage: python debug_walmart.py <store_id> [address]")
         sys.exit(1)

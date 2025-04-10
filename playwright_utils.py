@@ -1,5 +1,7 @@
 """
-Playwright utility functions for browser automation
+Playwright utility functions for browser automation.
+This module provides a set of helper functions for working with Playwright browser automation,
+including browser initialization, element interaction, and clean browser termination.
 """
 
 import time
@@ -15,7 +17,17 @@ from config import PAGE_LOAD_TIMEOUT, SCRIPT_TIMEOUT
 logger = logging.getLogger(__name__)
 
 def setup_playwright_browser(headless=True, retries=3, worker_id=0):
-    """Set up and return a Playwright browser instance with retry mechanism for true parallelism."""
+    """
+    Set up and return a Playwright browser instance with retry mechanism for true parallelism.
+    
+    Args:
+        headless (bool): Whether to run browser in headless mode
+        retries (int): Number of attempts to create browser before failing
+        worker_id (int): Unique ID for this worker to ensure isolation between parallel instances
+    
+    Returns:
+        dict: Dictionary containing playwright, browser, context and page objects or None if failed
+    """
     for attempt in range(retries):
         playwright = None
         try:
@@ -26,7 +38,7 @@ def setup_playwright_browser(headless=True, retries=3, worker_id=0):
             user_data_dir = os.path.join(tempfile.gettempdir(), f'playwright-profile-{worker_id}-{random.randint(1000, 9999)}')
             os.makedirs(user_data_dir, exist_ok=True)
             
-            # Configure browser options - NOTE: Playwright doesn't use the same options as Selenium
+            # Configure browser options
             browser_args = [
                 '--disable-gpu',
                 '--no-sandbox',
@@ -40,19 +52,17 @@ def setup_playwright_browser(headless=True, retries=3, worker_id=0):
                 '--silent',
             ]
             
-            # Set up browser - FIXED: removed user_data_dir from launch() parameters
+            # Set up browser
             browser = playwright.chromium.launch(
                 headless=headless,
                 args=browser_args,
                 timeout=30000,  # 30 seconds in ms
             )
             
-            # Create context with the user data directory - FIXED: user_data_dir goes here
+            # Create context with the user data directory
             context = browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent=get_random_user_agent(worker_id),
-                # Note: Playwright doesn't support setting user_data_dir in new_context
-                # so we'll rely on isolated browser contexts instead
             )
             
             # Create page with appropriate timeouts
@@ -91,7 +101,15 @@ def setup_playwright_browser(headless=True, retries=3, worker_id=0):
     return None
 
 def get_random_user_agent(worker_id=0):
-    """Get a random user agent with worker ID to ensure uniqueness."""
+    """
+    Get a random user agent with worker ID to ensure uniqueness.
+    
+    Args:
+        worker_id (int): Unique ID to append to the user agent
+    
+    Returns:
+        str: A randomized user agent string
+    """
     user_agents = [
         f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Worker/{worker_id}',
         f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Worker/{worker_id}',
@@ -100,7 +118,17 @@ def get_random_user_agent(worker_id=0):
     return random.choice(user_agents)
 
 def wait_for_element(page, selector, timeout=10):
-    """Wait for an element to appear on the page and return it."""
+    """
+    Wait for an element to appear on the page and return it.
+    
+    Args:
+        page: Playwright page object
+        selector (str): CSS selector for the element
+        timeout (int): Maximum time to wait in seconds
+    
+    Returns:
+        Element handle if found, None if timed out
+    """
     try:
         return page.wait_for_selector(selector, timeout=timeout*1000, state="visible")
     except PlaywrightTimeoutError:
@@ -108,7 +136,17 @@ def wait_for_element(page, selector, timeout=10):
         return None
 
 def safe_click(page, selector, timeout=5):
-    """Safely click an element with multiple fallback methods."""
+    """
+    Safely click an element with multiple fallback methods.
+    
+    Args:
+        page: Playwright page object
+        selector (str): CSS selector for the element to click
+        timeout (int): Maximum time to wait in seconds
+    
+    Returns:
+        bool: True if click succeeded, False otherwise
+    """
     try:
         element = wait_for_element(page, selector, timeout=timeout)
         if element:
@@ -125,7 +163,16 @@ def safe_click(page, selector, timeout=5):
             return False
 
 def scroll_to_element(page, selector):
-    """Scroll to make an element visible."""
+    """
+    Scroll to make an element visible.
+    
+    Args:
+        page: Playwright page object
+        selector (str): CSS selector for the element to scroll to
+    
+    Returns:
+        bool: True if scroll succeeded, False otherwise
+    """
     try:
         element = page.query_selector(selector)
         if element:
@@ -138,7 +185,12 @@ def scroll_to_element(page, selector):
         return False
         
 def close_browser(browser_info):
-    """Properly close the browser and all associated resources."""
+    """
+    Properly close the browser and all associated resources.
+    
+    Args:
+        browser_info (dict): Dictionary containing browser resources to close
+    """
     if not browser_info:
         return
         

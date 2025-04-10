@@ -10,7 +10,21 @@ logger = logging.getLogger(__name__)
 def check_for_ifixit_in_walmart(
     page, walmart_address, store_id, process_result_elements
 ):
-    """Special high-priority function to detect iFixandRepair inside Walmart."""
+    """
+    Special high-priority function to detect iFixandRepair inside Walmart.
+    
+    This function runs targeted searches specifically looking for popular repair shops
+    that are frequently located within Walmart stores.
+    
+    Args:
+        page: Playwright page object
+        walmart_address (str): The full address of the Walmart location
+        store_id (str): The Walmart store ID
+        process_result_elements: Function to process search results
+        
+    Returns:
+        list: List of found mobile store objects
+    """
     found_stores = []
 
     # Extract street number and address components

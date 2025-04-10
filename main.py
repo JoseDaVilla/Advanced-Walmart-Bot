@@ -6,7 +6,7 @@ This script:
 2. Uses parallel processing for faster execution
 3. Checks reviews and for mobile stores using direct Google Maps search
 4. Sends email notifications about matching properties
-5. Runs on a daily schedule or one-time
+5. Runs on a daily schedule or as a one-time process
 """
 
 import os
@@ -44,7 +44,12 @@ logger = logging.getLogger(__name__)
 
 
 def check_playwright_status():
-    """Verify Playwright browser can be created."""
+    """
+    Verify Playwright browser can be created.
+    
+    Returns:
+        bool: True if Playwright browser works correctly, False otherwise
+    """
     logger.info("Checking Playwright browser status...")
 
     try:
@@ -64,7 +69,12 @@ def check_playwright_status():
 
 
 def monitor_resources():
-    """Monitor and log system resource usage during execution."""
+    """
+    Monitor and log system resource usage during execution.
+    
+    Returns:
+        threading.Event: Event to stop the monitoring thread
+    """
     stop_monitor = threading.Event()
 
     def _monitor_thread():
@@ -91,7 +101,15 @@ def monitor_resources():
 
 
 def job():
-    """Main job function to run the scraper and send notifications."""
+    """
+    Main job function to run the scraper and send notifications.
+    
+    This function:
+    1. Scrapes Walmart leasing site for properties with small spaces
+    2. Checks Google Maps for reviews and nearby mobile stores
+    3. Filters properties that meet criteria
+    4. Saves results and sends email notifications
+    """
     logger.info(f"Running job at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     start_time = time.time()
 
@@ -257,7 +275,11 @@ def job():
 
 
 def main():
-    """Main function to run the script once and set up scheduling."""
+    """
+    Main function to run the script once and set up scheduling if requested.
+    
+    Handles command line arguments and configuration overrides.
+    """
     # Create output directory if it doesn't exist
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -301,7 +323,7 @@ def main():
         SAVE_DEBUG_SCREENSHOTS = True
         logger.info("Debug screenshots enabled")
 
-    # Check if parallel workers specified - IMPORTANT: This needs to be applied to the config
+    # Check if parallel workers specified
     if "--workers" in sys.argv:
         try:
             idx = sys.argv.index("--workers")
@@ -335,7 +357,7 @@ def main():
         except Exception as e:
             logger.error(f"Error setting API worker count: {str(e)}")
 
-    # Run the job immediately (fixes the asyncio warning)
+    # Run the job immediately
     logger.info("Starting Walmart Leasing Space Checker (Playwright Version)")
 
     # Fix for asyncio warning: use get_running_loop instead of get_event_loop
@@ -343,9 +365,7 @@ def main():
         import asyncio
 
         try:
-            loop = (
-                asyncio.get_running_loop()
-            )  # This will raise a RuntimeError if no loop is running
+            loop = asyncio.get_running_loop()  # This will raise a RuntimeError if no loop is running
             logger.warning(
                 "Detected running asyncio event loop - this may cause issues with Playwright"
             )

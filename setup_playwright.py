@@ -1,5 +1,6 @@
 """
-Setup script for installing Playwright and its dependencies
+Setup script for installing Playwright and its dependencies.
+This module provides functionality to install Playwright and verify its installation.
 """
 
 import subprocess
@@ -17,7 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def install_playwright():
-    """Install Playwright and its dependencies."""
+    """
+    Install Playwright and its dependencies.
+    
+    Returns:
+        bool: True if installation was successful, False otherwise
+    """
     try:
         logger.info("Installing Playwright...")
 
@@ -42,7 +48,12 @@ def install_playwright():
 
 
 def test_playwright():
-    """Test that Playwright is working properly."""
+    """
+    Test that Playwright is working properly.
+    
+    Returns:
+        bool: True if test was successful, False otherwise
+    """
     try:
         logger.info("Testing Playwright installation...")
 

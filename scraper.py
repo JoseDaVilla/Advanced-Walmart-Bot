@@ -1,6 +1,7 @@
 """
-Core scraper functionality for Walmart leasing properties
-Using Playwright for browser automation
+Core scraper functionality for Walmart leasing properties.
+This module handles web scraping of the Walmart leasing site to extract information 
+about properties with available small spaces.
 """
 
 import re
@@ -24,7 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def extract_property_info(button_html):
-    """Extract basic property info from button HTML."""
+    """
+    Extract basic property info from button HTML.
+    
+    Args:
+        button_html (str): HTML content of the property button
+        
+    Returns:
+        dict: Property information or None if extraction failed
+    """
     soup = BeautifulSoup(button_html, "html.parser")
 
     # Extract store info div
@@ -292,6 +301,13 @@ def process_property_chunk(button_indices, worker_id=0):
     """
     Process a chunk of property indices with a truly independent browser instance.
     Each worker has its own browser to enable real parallelism.
+    
+    Args:
+        button_indices (list): Indices of buttons to process
+        worker_id (int): ID of the worker processing this chunk
+        
+    Returns:
+        list: List of properties with extracted information
     """
     logger.info(
         f"Worker {worker_id}: Starting to process {len(button_indices)} buttons"
@@ -620,7 +636,15 @@ def process_property_chunk(button_indices, worker_id=0):
 
 
 def get_total_button_count(max_retries=3):
-    """Get the total number of property buttons from the leasing page."""
+    """
+    Get the total number of property buttons from the leasing page.
+    
+    Args:
+        max_retries (int): Maximum number of retry attempts
+        
+    Returns:
+        int: Total number of property buttons found, or 0 if failed
+    """
     browser_info = None
 
     for attempt in range(max_retries):
@@ -681,6 +705,9 @@ def get_total_button_count(max_retries=3):
 def get_walmart_properties_with_small_spaces():
     """
     Main function to scrape Walmart leasing properties using true parallel processing.
+    
+    Returns:
+        list: List of properties with small spaces (< 1000 sqft)
     """
     logger.info("Starting true parallel Walmart leasing scraper...")
 

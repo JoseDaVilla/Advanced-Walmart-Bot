@@ -1,13 +1,15 @@
 """
-Configuration settings for the Walmart Leasing Checker
+Configuration settings for the Walmart Leasing Checker.
+This module defines all configurable parameters used throughout the application,
+including URLs, search settings, mobile store detection keywords, and more.
 """
 
 import os
 
 # URLs and search settings
 WALMART_LEASING_URL = "https://leasing.walmart.com/viewspaces"
-MAX_SPACE_SIZE = 1000
-MIN_REVIEWS = 10000
+MAX_SPACE_SIZE = 1000  # Maximum square footage for small spaces
+MIN_REVIEWS = 10000    # Minimum Google reviews required to qualify
 
 # Keywords for mobile store detection - EXPANDED with specific brands
 MOBILE_STORE_KEYWORDS = [
@@ -85,7 +87,7 @@ MOBILE_STORE_KEYWORDS = [
 
 # Email configuration
 EMAIL_SENDER = "testproject815@gmail.com"
-EMAIL_PASSWORD = "bhkf idoc twdj hidb"
+EMAIL_PASSWORD = "bhkf idoc twdj hidb"  # App-specific password, not actual account password
 EMAIL_RECEIVER = "josedvilla18@gmail.com"
 
 # Output directory for JSON data
@@ -94,16 +96,14 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Concurrency settings
 WEB_WORKERS = 15  # Number of parallel browser workers for Walmart scraping
-API_WORKERS = 8  # Number of parallel browser workers for location checking
+API_WORKERS = 8   # Number of parallel browser workers for location checking
 
 # Google Maps search settings
-SEARCH_RADIUS_METERS = (
-    200  # Search radius for nearby stores (increased from 100 to 200)
-)
+SEARCH_RADIUS_METERS = 200  # Search radius for nearby stores in meters
 GOOGLE_MAPS_URL = "https://www.google.com/maps/search/"
 
 # Timeout settings
 PAGE_LOAD_TIMEOUT = 45  # Seconds to wait for page load
-SCRIPT_TIMEOUT = 30  # Seconds to wait for scripts to execute
-ELEMENT_TIMEOUT = 20  # Seconds to wait for elements to appear
+SCRIPT_TIMEOUT = 30     # Seconds to wait for scripts to execute
+ELEMENT_TIMEOUT = 20    # Seconds to wait for elements to appear
 MAPS_LOAD_TIMEOUT = 20  # Seconds to wait for Google Maps to load

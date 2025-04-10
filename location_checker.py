@@ -1,6 +1,7 @@
 """
-Location checker for Walmart properties
-Uses direct Google Maps searches with Playwright
+Location checker for Walmart properties.
+This module provides functionality to search Google Maps for Walmart locations and
+detect if they have mobile repair stores nearby or inside them.
 """
 
 import re
@@ -29,7 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 def extract_city_zip_from_address(address):
-    """Extract city and zip code from a formatted address string with better handling of different formats."""
+    """
+    Extract city and zip code from a formatted address string with better handling of different formats.
+    
+    Args:
+        address (str): A formatted address string
+        
+    Returns:
+        dict: Dictionary with 'city' and 'zip_code' keys
+    """
     try:
         # Handle empty or None addresses
         if not address or address.strip() in ["Unknown", ""]:
@@ -90,6 +99,13 @@ def address_similarity_check(address1, address2):
     """
     Enhanced check if two addresses are similar enough to likely be the same location.
     Better detection of stores inside Walmart with differently formatted addresses.
+    
+    Args:
+        address1 (str): First address to compare
+        address2 (str): Second address to compare
+        
+    Returns:
+        bool: True if addresses appear to be the same location, False otherwise
     """
     # First convert both to lowercase and clean whitespace
     addr1 = address1.lower().strip()
@@ -218,7 +234,16 @@ def address_similarity_check(address1, address2):
 
 
 def extract_review_count_from_page(page, store_panel_selector=None):
-    """Extract review count from Google Maps page using multiple methods."""
+    """
+    Extract review count from Google Maps page using multiple methods.
+    
+    Args:
+        page: Playwright page object
+        store_panel_selector (str, optional): CSS selector for the store panel
+        
+    Returns:
+        int: The number of reviews found, or 0 if none found
+    """
     review_count = 0
 
     try:
@@ -373,6 +398,13 @@ def check_google_reviews_and_stores(property_info, worker_id=0):
     """
     Check Google Maps for review counts and nearby mobile stores using Playwright.
     Each call has a worker_id to ensure truly independent operation.
+    
+    Args:
+        property_info (dict): Dictionary containing property information
+        worker_id (int): Unique worker ID for browser isolation
+        
+    Returns:
+        dict: Updated property_info with review count and mobile store data
     """
     # Use the worker_id to ensure this instance is completely independent
     # Keep original address and store ID
@@ -609,6 +641,13 @@ def check_nearby_mobile_stores(browser_info, property_info):
     """
     Check for nearby mobile phone repair stores by directly searching on Google Maps.
     Enhanced to better detect stores within Walmart address.
+    
+    Args:
+        browser_info (dict): Dictionary containing browser objects
+        property_info (dict): Dictionary containing property information
+        
+    Returns:
+        dict: Result dictionary with has_mobile boolean and found stores list
     """
     result = {"has_mobile": False, "stores": []}
 
@@ -939,7 +978,16 @@ def check_nearby_mobile_stores(browser_info, property_info):
 
 
 def mobile_terms_present(name, address):
-    """Helper function to check if a store name or address contains mobile-related terms."""
+    """
+    Helper function to check if a store name or address contains mobile-related terms.
+    
+    Args:
+        name (str): The store name to check
+        address (str): The store address to check
+        
+    Returns:
+        bool: True if mobile terms are found, False otherwise
+    """
     mobile_terms = [
         "phone repair",
         "cell phone",
@@ -992,6 +1040,17 @@ def process_result_elements(
     """
     Helper function to process search result elements and extract store information.
     Improved detection for stores within Walmart address.
+    
+    Args:
+        page: Playwright page object
+        result_elements: List of result elements from Google Maps
+        found_stores (list, optional): Existing list of found stores to append to
+        walmart_address (str): The address of the Walmart store
+        extra_sensitive (bool): Whether to use extra sensitive matching
+        store_id (str): The Walmart store ID
+        
+    Returns:
+        list: List of found mobile store objects
     """
     if found_stores is None:
         found_stores = []
@@ -1457,7 +1516,15 @@ def process_result_elements(
 
 
 def check_locations_in_parallel(small_space_properties):
-    """Check Google Maps data for properties in parallel with true independence."""
+    """
+    Check Google Maps data for properties in parallel with true independence.
+    
+    Args:
+        small_space_properties (list): List of properties to check
+        
+    Returns:
+        list: List of properties with updated information about reviews and mobile stores
+    """
     logger.info(
         f"Checking Google Maps data for {len(small_space_properties)} properties in parallel"
     )
@@ -1507,9 +1574,8 @@ def check_locations_in_parallel(small_space_properties):
                     checked_properties.append(result)
                     status = "MATCH" if result.get("meets_criteria") else "NO MATCH"
                     if result.get("meets_criteria"):
-                        match_count += 1
                         logger.info(
-                            f"Property {result.get('store_number', 'Unknown')}: {status} - FOUND MATCH! ({match_count} matches so far)"
+                            f"Property {result.get('store_number', 'Unknown')}: {status} - FOUND MATCH!"
                         )
                     else:
                         reason = result.get("fail_reason", "Unknown")

@@ -1,5 +1,6 @@
 """
-Email notification functions for Walmart Leasing Checker
+Email notification functions for Walmart Leasing Checker.
+This module provides functionality to send formatted email notifications with Walmart leasing opportunities.
 """
 
 import logging
@@ -14,7 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 def send_email(properties):
-    """Send email notification about matching properties."""
+    """
+    Send email notification about matching properties.
+    
+    Args:
+        properties (list): List of properties that match all criteria
+    """
     if not properties:
         logger.info("No properties to notify about")
         return
