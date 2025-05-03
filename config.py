@@ -93,7 +93,7 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "json_data
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Concurrency settings
-WEB_WORKERS = 15  # Number of parallel browser workers for Walmart scraping
+WEB_WORKERS = 1  # Changed to 1 for sequential processing
 API_WORKERS = 8  # Number of parallel browser workers for location checking
 
 # Google Maps search settings
@@ -103,7 +103,12 @@ SEARCH_RADIUS_METERS = (
 GOOGLE_MAPS_URL = "https://www.google.com/maps/search/"
 
 # Timeout settings
-PAGE_LOAD_TIMEOUT = 45  # Seconds to wait for page load
-SCRIPT_TIMEOUT = 30  # Seconds to wait for scripts to execute
-ELEMENT_TIMEOUT = 20  # Seconds to wait for elements to appear
-MAPS_LOAD_TIMEOUT = 20  # Seconds to wait for Google Maps to load
+PAGE_LOAD_TIMEOUT = 60  # Increased from 45 to 60 seconds
+SCRIPT_TIMEOUT = 45  # Increased from 30 to 45 seconds
+ELEMENT_TIMEOUT = 30  # Increased from 20 to 30 seconds
+MAPS_LOAD_TIMEOUT = 30  # Increased from 20 to 30 seconds
+
+# DataForSEO API credentials
+DATASEO_LOGIN = "josevilla@geeks5g.com"  # Your account email
+DATASEO_PASSWORD = "81a8a7a078bfa37c"    # Your API key
+DATASEO_NEARBY_RADIUS = 200  # Search radius in meters

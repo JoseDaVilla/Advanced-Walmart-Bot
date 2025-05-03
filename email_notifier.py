@@ -1,5 +1,5 @@
 """
-Email notification functions for Walmart Leasing Checker
+Funciones de notificación por correo electrónico para el Verificador de Arrendamiento de Walmart
 """
 
 import logging
@@ -9,14 +9,19 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from config import EMAIL_SENDER, EMAIL_RECEIVER, EMAIL_PASSWORD
 
-# Configure logging
+# Configuración de logs
 logger = logging.getLogger(__name__)
 
 
 def send_email(properties):
-    """Send email notification about matching properties."""
+    """
+    Envía notificación por correo electrónico sobre propiedades coincidentes.
+
+    Args:
+        properties: Lista de propiedades que coinciden con criterios
+    """
     if not properties:
-        logger.info("No properties to notify about")
+        logger.info("No hay propiedades sobre las cuales notificar")
         return
 
     try:
@@ -24,10 +29,10 @@ def send_email(properties):
         msg["From"] = EMAIL_SENDER
         msg["To"] = EMAIL_RECEIVER
         msg["Subject"] = (
-            f"Walmart Leasing Opportunities - {datetime.now().strftime('%Y-%m-%d')}"
+            f"Oportunidades de Arrendamiento en Walmart - {datetime.now().strftime('%Y-%m-%d')}"
         )
 
-        # Create HTML content with improved table structure
+        # Crear contenido HTML con estructura de tabla mejorada
         html_content = f"""
         <html>
         <head>
@@ -75,63 +80,63 @@ def send_email(properties):
             </style>
         </head>
         <body>
-            <h2>Walmart Leasing Opportunities</h2>
-            <p>Found {len(properties)} locations matching your criteria:</p>
+            <h2>Oportunidades de Arrendamiento en Walmart</h2>
+            <p>Se encontraron {len(properties)} ubicaciones que coinciden con sus criterios:</p>
             <table>
                 <tr>
-                    <th>Store #</th>
-                    <th>Address</th>
-                    <th>City</th>
-                    <th>ZIP</th>
-                    <th>Available Spaces</th>
-                    <th>Reviews</th>
-                    <th>Status</th>
+                    <th>Tienda #</th>
+                    <th>Dirección</th>
+                    <th>Ciudad</th>
+                    <th>CP</th>
+                    <th>Espacios Disponibles</th>
+                    <th>Reseñas</th>
+                    <th>Estado</th>
                 </tr>
         """
 
-        # Add a plain text version as well
-        text_content = "Walmart Leasing Opportunities\n\n"
-        text_content += f"Found {len(properties)} locations matching your criteria:\n\n"
+        # Agregar versión de texto plano también
+        text_content = "Oportunidades de Arrendamiento en Walmart\n\n"
+        text_content += f"Se encontraron {len(properties)} ubicaciones que coinciden con sus criterios:\n\n"
 
-        # Add each property to the email with improved space formatting
+        # Agregar cada propiedad al correo electrónico con formato de espacio mejorado
         for prop in properties:
-            # Use the leasing site store ID as the primary ID
+            # Usar el ID de tienda del sitio de arrendamiento como ID principal
             store_id = prop.get("store_id", "Unknown")
-            store_num = f"Store #{store_id}"
+            store_num = f"Tienda #{store_id}"
 
-            # Original address from leasing site
+            # Dirección original del sitio de arrendamiento
             leasing_address = prop.get("address", "Unknown")
 
-            # Use city and zip from Google data
+            # Usar ciudad y código postal de los datos de Google
             city = prop.get("city", "Unknown")
             zip_code = prop.get("zip_code", "Unknown")
             reviews = prop.get("review_count", "N/A")
 
-            # Modified: Create a simple link to the Walmart website if available
+            # Crear un enlace simple al sitio web de Walmart si está disponible
             website = prop.get("website", "")
             website_html = (
-                f"<br><a href='{website}' target='_blank'>Website</a>"
+                f"<br><a href='{website}' target='_blank'>Sitio Web</a>"
                 if website
                 else ""
             )
 
-            # Create space details HTML - improved formatting with bullet points
+            # Crear detalles de espacio HTML - formato mejorado con viñetas
             space_html = "<ul class='space-list'>"
             space_text = ""
 
             for space in sorted(prop.get("spaces", []), key=lambda x: x.get("sqft", 0)):
-                suite = space.get("suite", "TBD")
+                suite = space.get("suite", "Por determinar")
                 sqft = space.get("sqft", "Unknown")
-                space_html += f"<li><strong>Suite {suite}</strong>: {sqft} sqft</li>"
-                space_text += f"- Suite {suite}: {sqft} sqft\n"
+                space_html += f"<li><strong>Suite {suite}</strong>: {sqft} pies²</li>"
+                space_text += f"- Suite {suite}: {sqft} pies²\n"
 
             space_html += "</ul>"
 
-            # All properties in the final list have been confirmed to NOT have mobile stores
+            # Todas las propiedades en la lista final han sido confirmadas para NO tener tiendas móviles
             radius = prop.get("mobile_store_search_radius", "100m")
-            mobile_store = f"No mobile stores detected within {radius} <span class='check'>&check;</span>"
+            mobile_store = f"No se detectaron tiendas móviles en un radio de {radius} <span class='check'>&check;</span>"
 
-            # Add to HTML content with improved layout
+            # Agregar al contenido HTML con diseño mejorado
             html_content += f"""
                 <tr>
                     <td><strong>{store_num}</strong>{website_html}</td>
@@ -144,46 +149,46 @@ def send_email(properties):
                 </tr>
             """
 
-            # Add to text content
-            text_content += f"• {store_num} at {leasing_address} - {city}, {zip_code} - {reviews} reviews - No mobile store *\n"
+            # Agregar al contenido de texto
+            text_content += f"• {store_num} en {leasing_address} - {city}, {zip_code} - {reviews} reseñas - Sin tiendas móviles *\n"
             text_content += space_text
             text_content += "\n"
 
-        # Close the HTML with better explanation of mobile store detection
+        # Cerrar el HTML con mejor explicación de detección de tiendas móviles
         html_content += """
             </table>
-            <p>This is an automated message from your Walmart Leasing Checker.</p>
-            <p><strong>Note:</strong> All listings above have been verified to meet the following criteria:</p>
+            <p>Este es un mensaje automatizado de su Verificador de Arrendamiento de Walmart.</p>
+            <p><strong>Nota:</strong> Todos los listados anteriores han sido verificados para cumplir con los siguientes criterios:</p>
             <ul>
-                <li>Available space under 1000 sqft</li>
-                <li>Over 10,000 Google reviews</li>
-                <li>No mobile phone repair stores present within 200 meters or at the same address as the Walmart</li>
-                <li>Must have verified city and ZIP code information</li>
+                <li>Espacio disponible menor a 1000 pies²</li>
+                <li>Más de 10,000 reseñas en Google</li>
+                <li>Sin tiendas de reparación de teléfonos móviles presentes en un radio de 200 metros o en la misma dirección que el Walmart</li>
+                <li>Debe tener información verificada de ciudad y código postal</li>
             </ul>
-            <p><strong>How Mobile Store Detection Works:</strong> The system performs multiple checks for each Walmart location:</p>
+            <p><strong>Cómo funciona la detección de tiendas móviles:</strong> El sistema realiza múltiples comprobaciones para cada ubicación de Walmart:</p>
             <ol>
-                <li>It uses Google Maps' "Nearby" feature directly from the Walmart location page to search for "mobile phone repair"</li>
-                <li>It performs separate searches for "cell phone repair near [address]" and "mobile repair store near [address]"</li>
-                <li>It performs targeted searches for specific brands ("The Fix", "iFixAndRepair", "Boost Mobile", etc.) + the Walmart address</li>
-                <li>All search results are analyzed both for distance (within 200m) AND to detect if they're at the same address as the Walmart</li>
-                <li>Any stores matching targeted keywords (The Fix, iFixAndRepair, Cellaris, Talk N Fix, Techy, etc.) are flagged</li>
-                <li>The system uses multiple search strategies to ensure thorough detection of mobile stores</li>
+                <li>Utiliza la función "Cerca" de Google Maps directamente desde la página de ubicación de Walmart para buscar "reparación de teléfonos móviles"</li>
+                <li>Realiza búsquedas separadas para "reparación de teléfonos celulares cerca de [dirección]" y "tienda de reparación móvil cerca de [dirección]"</li>
+                <li>Realiza búsquedas específicas para marcas específicas ("The Fix", "iFixAndRepair", "Boost Mobile", etc.) + la dirección de Walmart</li>
+                <li>Todos los resultados de búsqueda se analizan tanto por distancia (dentro de 200m) como para detectar si están en la misma dirección que el Walmart</li>
+                <li>Se marcan todas las tiendas que coinciden con palabras clave específicas (The Fix, iFixAndRepair, Cellaris, Talk N Fix, Techy, etc.)</li>
+                <li>El sistema utiliza múltiples estrategias de búsqueda para garantizar una detección exhaustiva de tiendas móviles</li>
             </ol>
-            <p>This enhanced approach ensures we detect both standalone repair shops nearby AND services located within the Walmart itself.</p>
+            <p>Este enfoque mejorado garantiza que detectemos tanto tiendas de reparación independientes cercanas como servicios ubicados dentro del propio Walmart.</p>
         </body>
         </html>
         """
 
-        # Attach both text and HTML parts
+        # Adjuntar partes de texto y HTML
         msg.attach(MIMEText(text_content, "plain"))
         msg.attach(MIMEText(html_content, "html"))
 
-        # Send the email
+        # Enviar el correo electrónico
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
-            logger.info(f"Email sent successfully to {EMAIL_RECEIVER}")
+            logger.info(f"Correo electrónico enviado exitosamente a {EMAIL_RECEIVER}")
 
     except Exception as e:
-        logger.error(f"Error sending email: {str(e)}")
+        logger.error(f"Error al enviar correo electrónico: {str(e)}")

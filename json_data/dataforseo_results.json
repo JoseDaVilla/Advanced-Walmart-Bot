@@ -1,0 +1,276 @@
+[
+  {
+    "store_id": "564",
+    "store_number": "Store #564",
+    "address": "6100 W RENO AVE",
+    "spaces": [
+      {
+        "suite": "600",
+        "sqft": 390,
+        "text": "Suite 600 | 390 sqft",
+        "store_id": "564"
+      }
+    ],
+    "review_count": 11208,
+    "full_address": "\ue0c8\n6100 W Reno Ave, Oklahoma City, OK 73127, Estados Unidos",
+    "city": "Oklahoma City",
+    "zip_code": "73127",
+    "meets_criteria": true,
+    "location_coordinate": "35.4729886,-97.5170536",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "850",
+    "store_number": "Store #850",
+    "address": "2701 CARLISLE BLVD NE",
+    "spaces": [
+      {
+        "suite": "600",
+        "sqft": 561,
+        "text": "Suite 600 | 561 sqft",
+        "store_id": "850"
+      }
+    ],
+    "review_count": 10026,
+    "full_address": "\ue0c8\n2701 Carlisle Blvd NE, Albuquerque, NM 87110, Estados Unidos",
+    "city": "Albuquerque",
+    "zip_code": "87110",
+    "meets_criteria": true,
+    "location_coordinate": "35.0841034,-106.650985",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "2512",
+    "store_number": "Store #2512",
+    "address": "1825 W BELL RD",
+    "spaces": [
+      {
+        "suite": "110",
+        "sqft": 828,
+        "text": "Suite 110 | 828 sqft",
+        "store_id": "2512"
+      }
+    ],
+    "review_count": 10747,
+    "full_address": "\ue0c8\n1825 W Bell Rd, Phoenix, AZ 85023, Estados Unidos",
+    "city": "Phoenix",
+    "zip_code": "85023",
+    "meets_criteria": true,
+    "location_coordinate": "33.4484367,-112.074141",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "722",
+    "store_number": "Store #722",
+    "address": "1735 S HIGHWAY 27",
+    "spaces": [
+      {
+        "suite": "130",
+        "sqft": 945,
+        "text": "Suite 130 | 945 sqft",
+        "store_id": "722"
+      },
+      {
+        "suite": "600",
+        "sqft": 404,
+        "text": "Suite 600 | 404 sqft",
+        "store_id": "722"
+      }
+    ],
+    "review_count": 13261,
+    "full_address": "\ue0c8\n550 US-27, Clermont, FL 34714, Estados Unidos",
+    "city": "Clermont",
+    "zip_code": "34714",
+    "meets_criteria": true,
+    "location_coordinate": "28.5551912,-81.7669488",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "1220",
+    "store_number": "Store #1220",
+    "address": "2500 S KIRKMAN RD",
+    "spaces": [
+      {
+        "suite": "110",
+        "sqft": 907,
+        "text": "Suite 110 | 907 sqft",
+        "store_id": "1220"
+      },
+      {
+        "suite": "600",
+        "sqft": 390,
+        "text": "Suite 600 | 390 sqft",
+        "store_id": "1220"
+      }
+    ],
+    "review_count": 10727,
+    "full_address": "\ue0c8\n2500 S Kirkman Rd, Orlando, FL 32811, Estados Unidos",
+    "city": "Orlando",
+    "zip_code": "32811",
+    "meets_criteria": true,
+    "location_coordinate": "28.5421109,-81.3790304",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "908",
+    "store_number": "Store #908",
+    "address": "8101 S JOHN YOUNG PKWY",
+    "spaces": [
+      {
+        "suite": "100",
+        "sqft": 693,
+        "text": "Suite 100 | 693 sqft",
+        "store_id": "908"
+      },
+      {
+        "suite": "150",
+        "sqft": 955,
+        "text": "Suite 150 | 955 sqft",
+        "store_id": "908"
+      }
+    ],
+    "review_count": 13386,
+    "full_address": "\ue0c8\n8101 S John Young Pkwy, Orlando, FL 32819, Estados Unidos",
+    "city": "Orlando",
+    "zip_code": "32819",
+    "meets_criteria": true,
+    "location_coordinate": "28.5421109,-81.3790304",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "1686",
+    "store_number": "Store #1686",
+    "address": "5469 S REDWOOD RD",
+    "spaces": [
+      {
+        "suite": "610",
+        "sqft": 404,
+        "text": "Suite 610 | 404 sqft",
+        "store_id": "1686"
+      },
+      {
+        "suite": "700",
+        "sqft": 906,
+        "text": "Suite 700 | 906 sqft",
+        "store_id": "1686"
+      }
+    ],
+    "review_count": 10292,
+    "full_address": "\ue0c8\n5469 S Redwood Rd, Taylorsville, UT 84123, Estados Unidos",
+    "city": "Taylorsville",
+    "zip_code": "84123",
+    "meets_criteria": true,
+    "location_coordinate": "40.6676347,-111.9388027",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "2912",
+    "store_number": "Store #2912",
+    "address": "7555 TELEGRAPH RD",
+    "spaces": [
+      {
+        "suite": "801",
+        "sqft": 477,
+        "text": "Suite 801 | 477 sqft",
+        "store_id": "2912"
+      }
+    ],
+    "review_count": 10144,
+    "full_address": "\ue0c8\n7555 Telegraph Rd, Taylor, MI 48180, Estados Unidos",
+    "city": "Taylor",
+    "zip_code": "48180",
+    "meets_criteria": true,
+    "location_coordinate": "42.240872,-83.2696509",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "5448",
+    "store_number": "Store #5448",
+    "address": "160 BROADWAY",
+    "spaces": [
+      {
+        "suite": "100",
+        "sqft": 749,
+        "text": "Suite 100 | 749 sqft",
+        "store_id": "5448"
+      }
+    ],
+    "review_count": 18484,
+    "full_address": "\ue0c8\n400 Park Pl, Secaucus, NJ 07094, Estados Unidos",
+    "city": "Secaucus",
+    "zip_code": "07094",
+    "meets_criteria": true,
+    "location_coordinate": "40.7613294,-74.0757547",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  },
+  {
+    "store_id": "2423",
+    "store_number": "Store #2423",
+    "address": "PARQUE ESCORIAL",
+    "spaces": [
+      {
+        "suite": "510",
+        "sqft": 171,
+        "text": "Suite 510 | 171 sqft",
+        "store_id": "2423"
+      }
+    ],
+    "review_count": 11986,
+    "full_address": "\ue0c8\nParque Escorial, Carolina, 00987, Puerto Rico",
+    "city": "Carolina",
+    "zip_code": "00987",
+    "meets_criteria": true,
+    "location_coordinate": "18.3640277,-65.9526469",
+    "dataforseo_results": {
+      "has_mobile_store": false,
+      "mobile_stores": [],
+      "total_results": 0,
+      "unique_businesses": 0
+    }
+  }
+]

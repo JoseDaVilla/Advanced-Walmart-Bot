@@ -6,18 +6,24 @@ Using Playwright for browser automation
 import re
 import time
 import logging
-import concurrent.futures
+import os
+import random
 from bs4 import BeautifulSoup
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from colorama import Fore, Back, Style, init
 
-from config import WALMART_LEASING_URL, MAX_SPACE_SIZE, WEB_WORKERS
+from config import WALMART_LEASING_URL, MAX_SPACE_SIZE
 from playwright_utils import (
     setup_playwright_browser,
     close_browser,
     wait_for_element,
     scroll_to_element,
     safe_click,
+    force_click,
 )
+
+# Initialize colorama for cross-platform colored terminal output
+init(autoreset=True)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -74,661 +80,658 @@ def extract_modal_data(modal_html):
     soup = BeautifulSoup(modal_html, "html.parser")
     spaces = []
 
-    # Find the modal content
-    modal_content = soup.select_one(".MuiDialogContent-root") or soup
+    # NEW APPROACH: Look for the correct modal structure based on the actual HTML
+    # Check if we're seeing the modal content or the navigation bar
+    if modal_html and '<div class="MuiToolbar-root MuiToolbar-regular">' in modal_html:
+        logger.debug(f"{Fore.YELLOW}Modal HTML appears to be the navigation bar, not the modal content{Style.RESET_ALL}")
+        return spaces  # Return empty spaces, let JS extraction handle it
+    
+    # Since the JavaScript extraction is working well, we'll keep a simplified HTML extraction
+    # as a fallback only
+    
+    # Simple pattern-based extraction for Suite | sqft format
+    suite_pattern = re.compile(r'Suite\s+(\w+)\s*\|\s*(\d+)\s*sqft', re.IGNORECASE)
+    
+    # Apply this pattern to all text content
+    text_content = soup.get_text()
+    for match in suite_pattern.finditer(text_content):
+        try:
+            suite = match.group(1)
+            sqft = int(match.group(2))
+            spaces.append({
+                "suite": suite,
+                "sqft": sqft,
+                "text": f"Suite {suite} | {sqft} sqft",
+            })
+            logger.info(f"{Fore.GREEN}Found via simple pattern: Suite {suite} | {sqft} sqft{Style.RESET_ALL}")
+        except (ValueError, IndexError) as e:
+            logger.warning(f"{Fore.YELLOW}Error extracting suite details: {e}{Style.RESET_ALL}")
 
-    # Log the full HTML for debugging
-    logger.debug(f"Processing modal HTML (length: {len(modal_html)})")
-
-    # First try to extract the raw HTML to inspect for suite data
-    raw_html = str(modal_content)
-
-    # EXTRACT ACTUAL RAW TEXT FOR LOGS
-    raw_text = modal_content.get_text(separator=" | ", strip=True)
-    logger.debug(f"Modal content raw text: {raw_text[:200]}...")
-
-    # IMPROVED: First check for specific div structure that contains spaces
-    space_divs = modal_content.select(
-        "div.MuiBox-root, div.jss133, div.jss134, div.MuiGrid-item"
-    )
-    for div in space_divs:
-        if not div.get_text().strip():
-            continue
-
-        text = div.get_text(" | ", strip=True)
-
-        # Look for suite and sqft pattern with more flexible regex
-        suite_sqft_match = re.search(
-            r"(?:Suite|Ste\.?|Unit)\s+([A-Za-z0-9-]+).*?(\d{2,5})\s*(?:SF|sq\.?ft\.?|sqft)",
-            text,
-            re.IGNORECASE,
-        )
-        if suite_sqft_match:
-            suite = suite_sqft_match.group(1).strip()
-            sqft_str = suite_sqft_match.group(2).replace(",", "").replace(".", "")
-
-            try:
-                sqft = int(sqft_str)
-                spaces.append(
-                    {
-                        "suite": suite,
-                        "sqft": sqft,
-                        "text": f"Suite {suite} | {sqft} sqft",
-                    }
-                )
-                logger.info(f"Found space from div: Suite {suite} = {sqft} sqft")
-                continue  # Found a match, no need to further process this div
-            except ValueError:
-                pass
-
-    # IMPROVED APPROACH: Try to find data in the structured table format if we didn't find anything yet
-    if not spaces:
-        tables = modal_content.select("table")
-        for table in tables:
-            rows = table.select("tr")
-            for row in rows:
-                cells = row.select("td")
-                if len(cells) >= 2:
-                    # Extract suite number and square footage from table cells
-                    suite_text = cells[0].get_text(strip=True)
-                    sqft_text = cells[1].get_text(strip=True)
-
-                    # Process suite number more flexibly
-                    suite_match = re.search(
-                        r"(?:Suite\s+)?([A-Za-z0-9][\w\s-]*)", suite_text, re.IGNORECASE
-                    )
-                    suite = (
-                        suite_match.group(1).strip()
-                        if suite_match
-                        else suite_text.strip()
-                    )
-
-                    # More flexible square footage regex that handles numbers like 1565
-                    sqft_match = re.search(
-                        r"([\d,\.]+)\s*(?:sq\.?ft\.?|sqft|SF)", sqft_text, re.IGNORECASE
-                    )
-                    if sqft_match:
-                        try:
-                            # Remove commas and convert to int
-                            sqft_str = (
-                                sqft_match.group(1).replace(",", "").replace(".", "")
-                            )
-                            sqft = int(sqft_str)
-                            spaces.append(
-                                {
-                                    "suite": suite,
-                                    "sqft": sqft,
-                                    "text": f"Suite {suite} | {sqft} sqft",
-                                }
-                            )
-                            logger.info(
-                                f"Found space from table: Suite {suite} = {sqft} sqft"
-                            )
-                        except ValueError:
-                            pass
-
-    # IMPROVED: Direct regular expression search on the raw HTML
-    if not spaces:
-        # Direct pattern matching in the raw HTML to catch edge cases
-        direct_patterns = [
-            # Match "Suite X | Y sqft" pattern directly
-            r"Suite\s+([A-Za-z0-9-]+)\s*\|\s*(\d{2,5})\s*(?:SF|sq\.?ft\.?|sqft)",
-            # Match Suite and SF patterns that might be near each other
-            r"Suite\s+([A-Za-z0-9-]+)(?:[\s\S]{1,30}?)(\d{2,5})\s*(?:SF|sq\.?ft\.?|sqft)",
-        ]
-
-        for pattern in direct_patterns:
-            matches = re.findall(pattern, raw_html, re.IGNORECASE)
-            for match in matches:
-                try:
-                    suite = match[0].strip()
-                    sqft_str = match[1].replace(",", "")
-                    sqft = int(sqft_str)
-
-                    # Basic validation
-                    if (
-                        50 <= sqft <= 100000 and suite
-                    ):  # Increased upper limit to catch all sizes
-                        spaces.append(
-                            {
-                                "suite": suite,
-                                "sqft": sqft,
-                                "text": f"Suite {suite} | {sqft} sqft",
-                            }
-                        )
-                        logger.info(
-                            f"Found space from raw HTML: Suite {suite} = {sqft} sqft"
-                        )
-                except (ValueError, IndexError):
-                    pass
-
-    # If we still have nothing, try to extract from the raw text
-    if not spaces:
-        # Extract all text content with better line breaks preservation
-        modal_paragraphs = modal_content.select("p, div, span")
-        modal_texts = []
-        for p in modal_paragraphs:
-            text = p.get_text(strip=True)
-            if text:  # Only add non-empty text
-                modal_texts.append(text)
-
-        modal_text = "\n".join(modal_texts)
-
-        # IMPROVED PATTERNS: More accurately match suite information
-        space_patterns = [
-            # Pattern 1: Suite X | Y sqft format
-            r"Suite\s+([A-Za-z0-9-]+)\s*\|\s*([\d,\.]+)\s*(?:sq\.?ft\.?|SF|sqft)",
-            # Pattern 2: Suite and sqft on same line with various separators
-            r"Suite\s+([A-Za-z0-9-]+)[\s\:\|\-]+?([\d,\.]+)\s*(?:sq\.?ft\.?|SF|sqft)",
-            # Pattern 3: Suite with potentially multi-word identifier
-            r"Suite\s+([\w\s-]+?)[\s\:\|\-]+?([\d,\.]+)\s*(?:sq\.?ft\.?|SF|sqft)",
-            # Pattern 4: Any format mentioning suite and sqft within reasonable proximity
-            r"(?:Suite|Ste\.?|Unit)\s+([A-Za-z0-9-]+)(?:[\s\S]{1,50}?)([\d,\.]+)\s*(?:sq\.?ft\.?|SF|sqft)",
-            # Pattern 5: Look for any sqft format
-            r"(\w+[-\w]*)[\s\:\|\-]+?([\d,\.]+)\s*(?:sq\.?ft\.?|SF|sqft)",
-        ]
-
-        # Process all text blocks line by line for better detection
-        for line in modal_text.split("\n"):
-            for pattern in space_patterns:
-                matches = re.findall(pattern, line, re.IGNORECASE)
-                for match in matches:
-                    try:
-                        suite = match[0].strip()
-                        # Clean up the suite number
-                        if not suite or suite.lower() in ["suite", "ste", "unit"]:
-                            continue
-
-                        # Handle square footage with commas or periods
-                        sqft_str = match[1].replace(",", "").replace(".", "")
-                        if not sqft_str.isdigit():
-                            continue
-
-                        sqft = int(sqft_str)
-
-                        # Expanded validation - sqft should be reasonable (up to 10000)
-                        if 50 <= sqft <= 10000 and suite:
-                            # Check if we already have this suite
-                            if not any(s["suite"] == suite for s in spaces):
-                                spaces.append(
-                                    {
-                                        "suite": suite,
-                                        "sqft": sqft,
-                                        "text": f"Suite {suite} | {sqft} sqft",
-                                    }
-                                )
-                                logger.info(
-                                    f"Found space from regex: Suite {suite} = {sqft} sqft"
-                                )
-                    except (ValueError, IndexError):
-                        pass
-
-    # Deduplicate spaces based on suite numbers
+    # Extra validation and logging - don't show warnings here since we know JS is working
     if spaces:
-        unique_spaces = {}
-        for space in spaces:
-            suite = space["suite"]
-            if (
-                suite not in unique_spaces
-                or space["sqft"] < unique_spaces[suite]["sqft"]
-            ):
-                unique_spaces[suite] = space
-        spaces = list(unique_spaces.values())
-
-    # Extra validation and logging
-    if spaces:
-        # Log the list of extracted spaces for debugging
-        logger.info(
-            f"Found {len(spaces)} spaces: {[(s['suite'], s['sqft']) for s in spaces]}"
-        )
-    else:
-        logger.warning("Could not extract any spaces from modal")
-
+        logger.info(f"{Fore.GREEN}Found {len(spaces)} spaces via HTML parsing: {[(s['suite'], s['sqft']) for s in spaces]}{Style.RESET_ALL}")
+    # Don't log a warning here since this is expected to fail when JS extraction works
+    
     # Return spaces sorted by suite number for consistency
     return sorted(spaces, key=lambda x: x.get("suite", ""))
 
 
-def process_property_chunk(button_indices, worker_id=0):
-    """
-    Process a chunk of property indices with a truly independent browser instance.
-    Each worker has its own browser to enable real parallelism.
-    """
-    logger.info(
-        f"Worker {worker_id}: Starting to process {len(button_indices)} buttons"
-    )
+def extract_modal_data_from_html(modal_html):
+    """Extract spaces information from modal HTML string (helper for JavaScript extraction)."""
+    spaces = []
+    
+    # Process using BeautifulSoup
+    soup = BeautifulSoup(modal_html, "html.parser")
+    
+    try:
+        # Look for suite information in the HTML
+        suite_pattern = re.compile(r'Suite\s+(\w+)\s*\|\s*(\d+)\s*sqft', re.IGNORECASE)
+        
+        # Find all text nodes in the HTML
+        for text in soup.stripped_strings:
+            match = suite_pattern.search(text)
+            if match:
+                suite = match.group(1)
+                sqft = int(match.group(2))
+                spaces.append({
+                    "suite": suite,
+                    "sqft": sqft,
+                    "text": f"Suite {suite} | {sqft} sqft",
+                })
+                logger.info(f"{Fore.GREEN}Direct HTML extraction: Suite {suite} | {sqft} sqft{Style.RESET_ALL}")
+        
+        if spaces:
+            # Deduplicate spaces
+            unique_spaces = {}
+            for space in spaces:
+                suite = space["suite"]
+                if suite not in unique_spaces or space["sqft"] < unique_spaces[suite]["sqft"]:
+                    unique_spaces[suite] = space
+            
+            spaces = list(unique_spaces.values())
+        
+    except Exception as e:
+        logger.error(f"{Fore.RED}Error extracting spaces from direct HTML: {str(e)}{Style.RESET_ALL}")
+    
+    return spaces
 
-    # Set up a new browser instance with retry mechanism
-    browser_info = setup_playwright_browser(
-        headless=True, retries=3, worker_id=worker_id
-    )
 
+def process_properties_sequentially():
+    """
+    Process all properties sequentially (non-parallel) to ensure accurate data extraction,
+    following a precise workflow and providing detailed colored logs.
+    Returns:
+        List of property dictionaries with space information
+    """
+    logger.info(f"{Fore.CYAN}Step 1: Starting sequential Walmart leasing scraper...{Style.RESET_ALL}")
+    # Create a browser instance for the entire process
+    browser_info = setup_playwright_browser(headless=True, retries=3)
     if not browser_info:
-        logger.error(
-            f"Worker {worker_id}: Failed to create browser instance after multiple attempts"
-        )
+        logger.error(f"{Fore.RED}Failed to create browser instance after multiple attempts{Style.RESET_ALL}")
         return []
-
     page = browser_info["page"]
-
     properties = []
-    retry_count = 0
-    max_retries = 3
-
-    while retry_count < max_retries:
+    eligible_properties = []
+    
+    try:
+        # Step 1: Load the website
+        logger.info(f"{Fore.CYAN}Step 1: Loading Walmart leasing page...{Style.RESET_ALL}")
+        page.goto(WALMART_LEASING_URL, wait_until="domcontentloaded")
         try:
-            # Load the Walmart leasing page
-            page.goto(WALMART_LEASING_URL, wait_until="domcontentloaded")
-            logger.info(
-                f"Worker {worker_id}: Loaded Walmart leasing page (attempt {retry_count + 1})"
-            )
-
-            # Wait for the page to load - looking specifically for property buttons
-            try:
-                wait_for_element(page, "button.jss56", timeout=30)
-                logger.info(f"Worker {worker_id}: Page loaded successfully")
-            except PlaywrightTimeoutError:
-                logger.warning(
-                    f"Worker {worker_id}: Timeout waiting for page to load, retrying..."
-                )
-                retry_count += 1
-                continue
-
-            # Extra wait to ensure JavaScript is fully loaded
-            time.sleep(5)
-
-            # Find all property buttons
-            all_buttons = page.query_selector_all("button.jss56")
-            button_count = len(all_buttons)
-
-            # Verify we actually found buttons
+            wait_for_element(page, "button.jss56", timeout=60)  # Increased timeout
+            logger.info(f"{Fore.GREEN}Page loaded successfully{Style.RESET_ALL}")
+        except PlaywrightTimeoutError:
+            logger.error(f"{Fore.RED}Timeout waiting for page to load{Style.RESET_ALL}")
+            return []
+        time.sleep(10)  # Increased from 5 to 10
+        logger.info(f"{Fore.CYAN}Step 2: Identifying all available properties...{Style.RESET_ALL}")
+        all_buttons = page.query_selector_all("button.jss56")
+        button_count = len(all_buttons)
+        if (button_count == 0):
+            logger.error(f"{Fore.RED}No property buttons found on the page{Style.RESET_ALL}")
+            debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
+            os.makedirs(debug_dir, exist_ok=True)
+            screenshot_path = os.path.join(debug_dir, "no_buttons_found.png")
+            page.screenshot(path=screenshot_path)
+            logger.error(f"{Fore.RED}Screenshot saved to {screenshot_path}{Style.RESET_ALL}")
+            for alt_selector in ["button.MuiButtonBase-root", "div.jss58 > button", "div[role='button']"]:
+                alt_buttons = page.query_selector_all(alt_selector)
+                if len(alt_buttons) > 0:
+                    logger.info(f"{Fore.YELLOW}Found {len(alt_buttons)} buttons using alternative selector: {alt_selector}{Style.RESET_ALL}")
+                    all_buttons = alt_buttons
+                    button_count = len(all_buttons)
+                    break
             if button_count == 0:
-                logger.warning(f"Worker {worker_id}: No buttons found, retrying...")
-                retry_count += 1
-                continue
-
-            logger.info(f"Worker {worker_id}: Found {button_count} property buttons")
-
-            # Process buttons based on their index
-            processed_button_count = 0
-            for idx in button_indices:
-                if idx >= button_count:
-                    continue
-
+                return []
+        logger.info(f"{Fore.GREEN}Found {button_count} property buttons to process{Style.RESET_ALL}")
+        store_ids = []
+        for idx, button in enumerate(all_buttons):
+            try:
+                button_html = button.inner_html()
+                prop_info = extract_property_info(button_html)
+                if prop_info:
+                    store_ids.append({
+                        "index": idx,
+                        "store_id": prop_info["store_id"],
+                        "store_number": prop_info["store_number"],
+                        "address": prop_info["address"]
+                    })
+                    logger.info(f"{Fore.BLUE}Property {idx+1}/{button_count}: {prop_info['store_number']} - {prop_info['address']}{Style.RESET_ALL}")
+            except Exception as e:
+                logger.warning(f"{Fore.YELLOW}Failed to extract info for button {idx}: {str(e)}{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}Successfully identified {len(store_ids)} properties with valid store IDs{Style.RESET_ALL}")
+        logger.info(f"{Fore.CYAN}Step 3: Processing each property in sequence...{Style.RESET_ALL}")
+        for idx, store_info in enumerate(store_ids):
+            retry_count = 0
+            max_retries = 3
+            success = False
+            while retry_count < max_retries and not success:
+                if retry_count > 0:
+                    logger.info(f"{Fore.YELLOW}Retry #{retry_count} for {store_info['store_number']}{Style.RESET_ALL}")
+                    delay = 5 * (2 ** retry_count)
+                    time.sleep(delay)
+                button_idx = store_info["index"]
+                store_id = store_info["store_id"]
+                store_number = store_info["store_number"]
+                logger.info(f"{Fore.MAGENTA}Processing {store_number} ({idx+1}/{len(store_ids)}){Style.RESET_ALL}")
                 try:
-                    # Only log every 10 buttons to reduce log spam
-                    if processed_button_count % 10 == 0:
-                        logger.info(
-                            f"Worker {worker_id}: Processing button {idx} (progress: {processed_button_count}/{len(button_indices)})"
-                        )
-
-                    # Get a fresh reference to all buttons to avoid stale elements
-                    if (
-                        processed_button_count % 20 == 0
-                    ):  # Refresh button list periodically
+                    all_buttons = page.query_selector_all("button.jss56")
+                    if (button_idx >= len(all_buttons)):
+                        logger.warning(f"{Fore.YELLOW}Button index {button_idx} for {store_number} is out of range, refreshing page...{Style.RESET_ALL}")
+                        page.reload(wait_until="domcontentloaded")
+                        time.sleep(10)
                         all_buttons = page.query_selector_all("button.jss56")
-                        if len(all_buttons) == 0:
-                            logger.warning(
-                                f"Worker {worker_id}: Buttons disappeared, refreshing page..."
-                            )
-                            page.reload(wait_until="domcontentloaded")
-                            time.sleep(3)
-                            all_buttons = page.query_selector_all("button.jss56")
-
-                    # Skip if button index is out of range after refresh
-                    if idx >= len(all_buttons):
-                        continue
-
-                    # Get the button at this index
-                    button = all_buttons[idx]
-
-                    # Scroll to make button visible
+                        if button_idx >= len(all_buttons):
+                            logger.error(f"{Fore.RED}Button still out of range after refresh, skipping {store_number}{Style.RESET_ALL}")
+                            break
+                    button = all_buttons[button_idx]
                     try:
-                        button.scroll_into_view_if_needed()
-                        time.sleep(0.2)  # Brief pause after scrolling
+                        page.evaluate("""button => {
+                            button.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                        }""", button)
+                        time.sleep(1)
                     except Exception as e:
-                        logger.warning(
-                            f"Worker {worker_id}: Failed to scroll to button {idx}, skipping: {str(e)}"
-                        )
+                        logger.warning(f"{Fore.YELLOW}Failed to scroll to button for {store_number}, retrying... {str(e)}{Style.RESET_ALL}")
+                        retry_count += 1
                         continue
-
-                    # Extract info from button before clicking
+                    debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    pre_click_screenshot = os.path.join(debug_dir, f"pre_click_{store_id}.png")
+                    page.screenshot(path=pre_click_screenshot)
+                    logger.info(f"{Fore.BLUE}Clicking button for {store_number} to open details{Style.RESET_ALL}")
                     try:
-                        button_html = button.inner_html()
-                        prop_info = extract_property_info(button_html)
-
-                        if not prop_info:
-                            continue
-
-                        logger.info(
-                            f"Worker {worker_id}: Found property {prop_info['store_name']} with {prop_info['available_spaces']}"
-                        )
-
-                        # Click the button to open modal with force:true and various fallbacks
+                        button.click(timeout=5000)
+                        logger.debug(f"Used standard click for {store_number}")
+                        time.sleep(2)
+                    except Exception as e:
+                        logger.debug(f"Standard click failed: {str(e)}, trying force click")
                         try:
-                            # First attempt: force click with longer timeout
+                            button.click(force=True, timeout=8000)
+                            logger.debug(f"Used force click for {store_number}")
+                            time.sleep(2)
+                        except Exception as e2:
+                            logger.debug(f"Force click failed: {str(e2)}, trying JavaScript click")
                             try:
-                                button.click(force=True, timeout=10000)
-                                logger.info(
-                                    f"Force-clicked button for property {prop_info['store_name']}"
-                                )
-                            except Exception as click_error:
-                                # Second attempt: Try JavaScript click
-                                logger.warning(
-                                    f"Force click failed, trying JS click: {str(click_error)}"
-                                )
-                                try:
-                                    page.evaluate("arguments[0].click()", button)
-                                    logger.info(
-                                        f"JS-clicked button for property {prop_info['store_name']}"
-                                    )
-                                except Exception as js_error:
-                                    # Last attempt: dispatch click event
-                                    logger.warning(
-                                        f"JS click failed, trying dispatch event: {str(js_error)}"
-                                    )
-                                    page.evaluate(
-                                        """
-                                        (element) => {
-                                            const event = new MouseEvent('click', {
-                                                view: window,
-                                                bubbles: true,
-                                                cancelable: true
-                                            });
-                                            element.dispatchEvent(event);
-                                        }
-                                    """,
-                                        button,
-                                    )
-
-                            # Wait for modal - more generous timeout
-                            time.sleep(2)  # Increased from 1s to 2s
-
-                            # Extract space data from modal
-                            page_html = page.content()
-                            spaces = extract_modal_data(page_html)
-
-                            # Filter spaces by size more strictly
-                            small_spaces = [
-                                space
-                                for space in spaces
-                                if space["sqft"] < MAX_SPACE_SIZE
-                            ]
-
-                            # Only add property if it has at least one small space
-                            if small_spaces:
-                                logger.info(
-                                    f"Worker {worker_id}: Found {len(small_spaces)} spaces under {MAX_SPACE_SIZE} sqft"
-                                )
-                                prop_info["spaces"] = small_spaces
-                                properties.append(prop_info)
-                            else:
-                                logger.info(
-                                    f"Worker {worker_id}: No spaces under {MAX_SPACE_SIZE} sqft, skipping property"
-                                )
-
-                            # Close the modal with force click and advanced recovery
-                            try:
-                                # For closing the modal, try multiple approaches in sequence
-                                close_modal_success = False
-
-                                # Approach 1: Find close button by aria-label
-                                close_button = page.query_selector(
-                                    'button[aria-label="close"]'
-                                )
-                                if close_button:
-                                    try:
-                                        close_button.click(force=True, timeout=5000)
-                                        close_modal_success = True
-                                        logger.info(
-                                            "Closed modal with direct button click"
-                                        )
-                                    except:
-                                        pass
-
-                                # Approach 2: Use Escape key if the button click didn't work
-                                if not close_modal_success:
-                                    try:
-                                        page.keyboard.press("Escape")
-                                        time.sleep(0.5)
-                                        close_modal_success = True
-                                        logger.info("Closed modal with Escape key")
-                                    except:
-                                        pass
-
-                                # Approach 3: Try JavaScript to find and click close button
-                                if not close_modal_success:
-                                    try:
-                                        # This JS will try to find any likely close button element and click it
-                                        page.evaluate(
-                                            """
-                                            () => {
-                                                // Try various selectors for close buttons
-                                                const selectors = [
-                                                    'button[aria-label="close"]', 
-                                                    'button.MuiButtonBase-root svg',
-                                                    '.MuiDialog-root button',
-                                                    'button.MuiIconButton-root',
-                                                    'svg[data-testid="CloseIcon"]'
-                                                ];
-                                                
-                                                for(const selector of selectors) {
-                                                    const elements = document.querySelectorAll(selector);
-                                                    if(elements.length) {
-                                                        for(const el of elements) {
-                                                            // Try to find a close button by examining parent elements
-                                                            let current = el;
-                                                            for(let i = 0; i < 3; i++) {  // Check up to 3 levels up
-                                                                if(current && current.tagName === 'BUTTON') {
-                                                                    current.click();
-                                                                    return true;
-                                                                }
-                                                                current = current.parentElement;
-                                                            }
-                                                            
-                                                            // If we found an SVG, try clicking its parent
-                                                            if(el.tagName === 'svg' && el.parentElement) {
-                                                                el.parentElement.click();
-                                                                return true;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                // If all else fails, try to find buttons that might be close buttons
-                                                const buttons = document.querySelectorAll('button');
-                                                for(const btn of buttons) {
-                                                    const rect = btn.getBoundingClientRect();
-                                                    // Look for small buttons positioned in top-right corner
-                                                    if(rect.width < 50 && rect.height < 50 && rect.top < 100) {
-                                                        btn.click();
-                                                        return true;
-                                                    }
-                                                }
-                                                
-                                                return false;
-                                            }
-                                        """
-                                        )
-                                        time.sleep(1)
-                                        logger.info(
-                                            "Attempted to close modal via JavaScript"
-                                        )
-                                    except:
-                                        pass
-
-                                # Final approach: Just continue even if we couldn't close it
-                                logger.info("Continuing to next property...")
-
-                            except Exception as close_error:
-                                logger.warning(
-                                    f"Error handling modal close: {str(close_error)}"
-                                )
-                                # The most reliable fallback is just to press Escape
-                                try:
-                                    page.keyboard.press("Escape")
-                                except:
-                                    pass
-
-                            # Wait a bit before continuing to next property
-                            time.sleep(1)  # Increased from 0.5s to 1s
-
+                                page.evaluate("button => button.click()", button)
+                                logger.debug(f"Used JavaScript click for {store_number}")
+                                time.sleep(2)
+                            except Exception as e3:
+                                logger.warning(f"{Fore.YELLOW}All click methods failed for {store_number}{Style.RESET_ALL}")
+                                retry_count += 1
+                                continue
+                    time.sleep(5)
+                    modal_selectors = [
+                        # More specific selectors
+                        ".MuiDialog-paperScrollPaper", 
+                        ".MuiDialog-paper",
+                        # Try with content-specific selectors
+                        "div[role='dialog'] div:has(p:contains('Store #'))",
+                        "div[role='dialog'] div:has(p:contains('Showing'))",
+                        # Then try the general selectors with filtering
+                        ".MuiDialog-container",
+                        ".MuiModal-root",
+                        "div[role='dialog']",
+                        # Only use .MuiPaper-root as last resort with content verification
+                        ".MuiPaper-root"
+                    ]
+                    
+                    modal_element = None
+                    modal_found = False
+                    navbar_detected = False
+                    
+                    for selector in modal_selectors:
+                        try:
+                            elements = page.query_selector_all(selector)
+                            for element in elements:
+                                # Skip if this is the navbar
+                                inner_html = element.inner_html()
+                                if ('class="MuiToolbar-root"' in inner_html or 
+                                    'Your Shop at Walmart' in inner_html or
+                                    'viewspaces' in inner_html):
+                                    navbar_detected = True
+                                    logger.debug(f"Skipping navbar element found with selector: {selector}")
+                                    continue
+                                    
+                                # Look for indicators this is the modal we want
+                                # Try to verify this is actual modal content by checking for likely content
+                                modal_content_check = page.evaluate("""
+                                    (element) => {
+                                        // Check if element contains store information text
+                                        const hasStoreInfo = 
+                                            element.textContent.includes("Store #") || 
+                                            element.textContent.includes("Showing") ||
+                                            element.textContent.includes("Suite") ||
+                                            element.textContent.includes("sqft");
+                                            
+                                        // Check if element contains modal-specific UI like a back button
+                                        const hasBackButton = element.querySelector('svg') !== null;
+                                        
+                                        return {
+                                            hasStoreInfo,
+                                            hasBackButton,
+                                            text: element.textContent.slice(0, 100) // Get first 100 chars for logging
+                                        };
+                                    }
+                                """, element)
+                                
+                                if modal_content_check.get('hasStoreInfo') or modal_content_check.get('hasBackButton'):
+                                    logger.info(f"{Fore.GREEN}Found likely modal content: {modal_content_check.get('text', '').strip()}{Style.RESET_ALL}")
+                                    modal_element = element
+                                    modal_found = True
+                                    break
+                            
+                            if modal_found:
+                                logger.info(f"{Fore.GREEN}Modal found with selector: {selector}{Style.RESET_ALL}")
+                                break
+                                
                         except Exception as e:
-                            logger.error(
-                                f"Worker {worker_id}: Error processing modal: {str(e)}"
-                            )
-                            # Try to recover by pressing Escape and continuing
-                            try:
-                                page.keyboard.press("Escape")
-                                time.sleep(1)
-                            except:
-                                pass
-
-                    except Exception as e:
-                        logger.error(
-                            f"Worker {worker_id}: Error extracting info from button {idx}: {str(e)}"
-                        )
+                            logger.debug(f"Error checking selector {selector}: {str(e)}")
+                            continue
+                    
+                    if not modal_found and navbar_detected:
+                        logger.warning(f"{Fore.YELLOW}Detected navbar but not the actual modal for {store_number}{Style.RESET_ALL}")
+                    
+                    if not modal_found:
+                        logger.warning(f"{Fore.YELLOW}Could not find the modal content{Style.RESET_ALL}")
                         continue
-
-                    processed_button_count += 1
-
+                    
+                    modal_html = ""
+                    js_spaces = []
+                    try:
+                        # Get modal HTML for debugging first
+                        if modal_element:
+                            modal_html = modal_element.inner_html()
+                        
+                        # Fixed JavaScript extraction code
+                        js_extract_result = page.evaluate("""
+                            () => {
+                                const result = {
+                                    storeNumber: null,
+                                    spaces: []
+                                };
+                                
+                                // Get store number
+                                const storeNumElem = document.querySelector('p[class*="jss"]');
+                                if (storeNumElem && storeNumElem.textContent.includes('Store #')) {
+                                    result.storeNumber = storeNumElem.textContent.trim();
+                                }
+                                
+                                // Method 1: Look for paragraphs containing Suite | sqft pattern
+                                const paragraphs = document.querySelectorAll('p');
+                                for (const p of paragraphs) {
+                                    if (p.textContent.includes('Suite') && p.textContent.includes('sqft')) {
+                                        const match = p.textContent.match(/Suite\\s+(\\w+)\\s*\\|\\s*(\\d+)\\s*sqft/i);
+                                        if (match) {
+                                            result.spaces.push({
+                                                suite: match[1],
+                                                sqft: parseInt(match[2], 10)
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Method 2: Find spans with Suite and sqft text if we haven't found any spaces yet
+                                if (result.spaces.length === 0) {
+                                    // Look for spans with bold formatting
+                                    const boldSpans = Array.from(document.querySelectorAll('span[style*="font-weight: bold"]'));
+                                    for (const span of boldSpans) {
+                                        if (span.textContent.includes('Suite')) {
+                                            // Get the containing paragraph
+                                            const parent = span.closest('p');
+                                            if (parent && parent.textContent.includes('sqft')) {
+                                                const suiteMatch = span.textContent.match(/Suite\\s+(\\w+)/i);
+                                                const sqftMatch = parent.textContent.match(/(\\d+)\\s*sqft/i);
+                                                if (suiteMatch && sqftMatch) {
+                                                    result.spaces.push({
+                                                        suite: suiteMatch[1],
+                                                        sqft: parseInt(sqftMatch[1], 10)
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                return result;
+                            }
+                        """)
+                        
+                        # Process JS extraction results immediately
+                        if js_extract_result and js_extract_result.get('spaces'):
+                            logger.info(f"{Fore.GREEN}JS extraction found {len(js_extract_result['spaces'])} spaces{Style.RESET_ALL}")
+                            for space in js_extract_result['spaces']:
+                                logger.info(f"{Fore.GREEN}JS found: Suite {space['suite']} | {space['sqft']} sqft{Style.RESET_ALL}")
+                                js_spaces.append({
+                                    "suite": space['suite'],
+                                    "sqft": space['sqft'],
+                                    "text": f"Suite {space['suite']} | {space['sqft']} sqft"
+                                })
+                        else:
+                            logger.warning(f"{Fore.YELLOW}JavaScript extraction found no spaces for {store_number}{Style.RESET_ALL}")
+                            
+                            # Try fallback direct HTML scanning
+                            direct_js_result = page.evaluate("""
+                                () => {
+                                    const spaces = [];
+                                    
+                                    // Get entire document HTML and find all matches
+                                    const html = document.documentElement.innerHTML;
+                                    
+                                    // Regular expression to find Suite X | YYY sqft pattern
+                                    const pattern = /Suite\\s+([A-Za-z0-9]+)\\s*\\|\\s*(\\d+)\\s*sqft/gi;
+                                    let match;
+                                    
+                                    while ((match = pattern.exec(html)) !== null) {
+                                        spaces.push({
+                                            suite: match[1],
+                                            sqft: parseInt(match[2], 10)
+                                        });
+                                    }
+                                    
+                                    return { spaces };
+                                }
+                            """)
+                            
+                            if direct_js_result and direct_js_result.get('spaces'):
+                                logger.info(f"{Fore.GREEN}Direct HTML scan found {len(direct_js_result['spaces'])} spaces{Style.RESET_ALL}")
+                                for space in direct_js_result['spaces']:
+                                    logger.info(f"{Fore.GREEN}HTML scan found: Suite {space['suite']} | {space['sqft']} sqft{Style.RESET_ALL}")
+                                    js_spaces.append({
+                                        "suite": space['suite'],
+                                        "sqft": space['sqft'],
+                                        "text": f"Suite {space['suite']} | {space['sqft']} sqft"
+                                    })
+                    except Exception as e:
+                        logger.warning(f"{Fore.YELLOW}Error with JS extraction: {str(e)}, will try HTML parsing{Style.RESET_ALL}")
+                    
+                    if not modal_html:
+                        logger.warning(f"{Fore.YELLOW}Empty modal HTML for {store_number}, trying page content{Style.RESET_ALL}")
+                        try:
+                            modal_html = page.content()
+                        except Exception as page_e:
+                            logger.error(f"{Fore.RED}Failed to get page content: {str(page_e)}{Style.RESET_ALL}")
+                            modal_html = ""
+                    
+                    # Try HTML parsing approach
+                    html_spaces = extract_modal_data(modal_html)
+                    
+                    # IMPORTANT: If JS results exist, use those; otherwise use HTML parsing results
+                    if js_spaces:
+                        spaces = js_spaces
+                        if not html_spaces:
+                            logger.info(f"{Fore.GREEN}Using {len(js_spaces)} spaces found via JavaScript extraction{Style.RESET_ALL}")
+                    else:
+                        spaces = html_spaces
+                        if not spaces:
+                            logger.warning(f"{Fore.RED}✗ NO SPACES: {store_number} - Could not extract any space information{Style.RESET_ALL}")
+                    
+                    # Save modal HTML for debugging
+                    try:
+                        debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_html")
+                        os.makedirs(debug_dir, exist_ok=True)
+                        timestamp = int(time.time())
+                        with open(os.path.join(debug_dir, f"modal_{timestamp}.html"), "w", encoding="utf-8") as f:
+                            f.write(modal_html)
+                        logger.info(f"{Fore.BLUE}Saved modal HTML to debug_html/modal_{timestamp}.html{Style.RESET_ALL}")
+                    except Exception as e:
+                        logger.debug(f"Could not save debug HTML: {e}")
+                    
+                    # Continue with the rest of the processing
+                    for space in spaces:
+                        space["store_id"] = store_id
+                    
+                    all_spaces_count = len(spaces)
+                    small_spaces = [space for space in spaces if space["sqft"] < MAX_SPACE_SIZE]
+                    small_spaces_count = len(small_spaces)
+                    if all_spaces_count > 0:
+                        if small_spaces_count > 0:
+                            logger.info(f"{Fore.GREEN}✓ ELIGIBLE: {store_number} has {small_spaces_count}/{all_spaces_count} spaces under {MAX_SPACE_SIZE} sqft{Style.RESET_ALL}")
+                            for space in small_spaces:
+                                logger.info(f"{Fore.GREEN}    ► {store_number} - Suite {space['suite']} | {space['sqft']} sqft{Style.RESET_ALL}")
+                            prop_data = {
+                                "store_id": store_id,
+                                "store_number": store_number,
+                                "address": store_info["address"],
+                                "spaces": small_spaces
+                            }
+                            properties.append(prop_data)
+                            eligible_properties.append(prop_data)
+                        else:
+                            logger.info(f"{Fore.YELLOW}✗ NOT ELIGIBLE: {store_number} has {all_spaces_count} spaces, but none under {MAX_SPACE_SIZE} sqft{Style.RESET_ALL}")
+                            for space in spaces:
+                                logger.info(f"{Fore.YELLOW}    ► {store_number} - Suite {space['suite']} | {space['sqft']} sqft{Style.RESET_ALL}")
+                    else:
+                        logger.warning(f"{Fore.RED}✗ NO SPACES: {store_number} - Could not extract any space information{Style.RESET_ALL}")
+                    logger.info(f"{Fore.BLUE}Returning to property list from {store_number}{Style.RESET_ALL}")
+                    back_selectors = [
+                        'div.jss152',
+                        'div.jss125',
+                        # Use standard selectors without :contains()
+                        'div[class^="jss"] svg + span',
+                        'div[class^="jss"]:has(svg)',
+                        'div[class^="jss"] svg',
+                        # Try using text content evaluation
+                        'button[aria-label="Back"]',
+                        'div[role="button"]'
+                    ]
+                    back_clicked = False
+                    for selector in back_selectors:
+                        try:
+                            back_button = page.query_selector(selector)
+                            if back_button:
+                                back_button.click()
+                                time.sleep(2)
+                                back_clicked = True
+                                logger.info(f"{Fore.GREEN}Successfully returned to property list using selector: {selector}{Style.RESET_ALL}")
+                                break
+                        except Exception as e:
+                            logger.debug(f"Back button click failed with selector {selector}: {str(e)}")
+                    
+                    # Use JavaScript approach to find by text content if standard selectors failed
+                    if not back_clicked:
+                        try:
+                            page.evaluate("""
+                                () => {
+                                    // Find by text content instead of CSS selector
+                                    const allElements = Array.from(document.querySelectorAll('div, span, button'));
+                                    for (const el of allElements) {
+                                        if (el.textContent && el.textContent.includes('Back to properties')) {
+                                            // Try to find clickable parent or the element itself
+                                            let clickTarget = el;
+                                            // Look for parent with role="button" or actual button
+                                            while (clickTarget && clickTarget.tagName !== 'BODY') {
+                                                if (clickTarget.onclick || 
+                                                    clickTarget.tagName === 'BUTTON' ||
+                                                    clickTarget.getAttribute('role') === 'button' ||
+                                                    clickTarget.classList.value.startsWith('jss')) {
+                                                    clickTarget.click();
+                                                    return true;
+                                                };
+                                                clickTarget = clickTarget.parentElement;
+                                            }
+                                            // If no suitable parent found, try clicking the element anyway
+                                            el.click();
+                                            return true;
+                                        }
+                                    }
+                                    // Try finding an SVG that's likely a back button
+                                    const svgs = document.querySelectorAll('svg');
+                                    for (const svg of svgs) {
+                                        const parent = svg.parentElement;
+                                        if (parent && (parent.classList.value.startsWith('jss'))) {
+                                            parent.click();
+                                            return true;
+                                        }
+                                    }
+                                    const dialogs = document.querySelectorAll('.MuiDialog-root, .MuiModal-root, [role="dialog"]');
+                                    for (const dialog of dialogs) {
+                                        const buttons = dialog.querySelectorAll('button');
+                                        for (const btn of buttons) {
+                                            const rect = btn.getBoundingClientRect();
+                                            if (rect.width < 50 && rect.height < 50 && rect.top < dialog.getBoundingClientRect().top + 50) {
+                                                btn.click();
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                    return false;
+                                }
+                            """)
+                            time.sleep(2)
+                            logger.info(f"{Fore.GREEN}Attempted to return to property list using JavaScript{Style.RESET_ALL}")
+                            back_clicked = True
+                        except Exception as e:
+                            logger.warning(f"{Fore.YELLOW}JavaScript back button approach failed: {str(e)}{Style.RESET_ALL}")
+                    success = True
                 except Exception as e:
-                    logger.error(
-                        f"Worker {worker_id}: Error in button processing loop: {str(e)}"
-                    )
-                    continue
-
-            # If we processed any buttons successfully, break the retry loop
-            if processed_button_count > 0:
-                logger.info(
-                    f"Worker {worker_id}: Successfully processed {processed_button_count} buttons"
-                )
-                break
-
-            retry_count += 1
-
-        except Exception as e:
-            logger.error(f"Worker {worker_id}: Critical error in worker: {str(e)}")
-            retry_count += 1
-
-    # Clean up
-    close_browser(browser_info)
-
-    logger.info(
-        f"Worker {worker_id}: Completed with {len(properties)} properties found"
-    )
+                    logger.error(f"{Fore.RED}Error processing property {store_number}: {str(e)}{Style.RESET_ALL}")
+                    try_close_modal(page, ".MuiDialog-container")
+                    time.sleep(2)
+                    try:
+                        error_screenshot_path = os.path.join(debug_dir, f"error_{store_id}.png")
+                        page.screenshot(path=error_screenshot_path)
+                        logger.error(f"{Fore.RED}Error screenshot saved to {error_screenshot_path}{Style.RESET_ALL}")
+                    except:
+                        pass
+                    retry_count += 1
+                if retry_count >= max_retries and not success:
+                    logger.error(f"{Fore.RED}Failed to process {store_number} after {max_retries} attempts{Style.RESET_ALL}")
+            logger.info(f"{Fore.MAGENTA}Progress: {idx+1}/{len(store_ids)} properties processed, {len(eligible_properties)} eligible so far{Style.RESET_ALL}")
+            if idx < len(store_ids) - 1:
+                delay = random.uniform(1.0, 3.0)
+                time.sleep(delay)
+        logger.info(f"{Fore.GREEN}="*80)
+        logger.info(f"{Fore.GREEN}SUMMARY: Processed {len(store_ids)} properties")
+        logger.info(f"{Fore.GREEN}ELIGIBLE PROPERTIES: {len(eligible_properties)} properties with spaces under {MAX_SPACE_SIZE} sqft")
+        logger.info(f"{Fore.GREEN}="*80)        
+    except Exception as e:
+        logger.error(f"{Fore.RED}Critical error in scraper: {str(e)}{Style.RESET_ALL}")
+    finally:
+        # Always clean up resources
+        close_browser(browser_info)
     return properties
 
 
-def get_total_button_count(max_retries=3):
-    """Get the total number of property buttons from the leasing page."""
-    browser_info = None
-
-    for attempt in range(max_retries):
-        try:
-            browser_info = setup_playwright_browser(headless=True)
-            if not browser_info:
-                logger.error(
-                    f"Failed to create browser instance for button count (attempt {attempt + 1})"
-                )
-                time.sleep(5)
-                continue
-
-            page = browser_info["page"]
-
-            logger.info(
-                f"Loading Walmart leasing page to count buttons (attempt {attempt + 1})"
-            )
-            page.goto(WALMART_LEASING_URL, wait_until="domcontentloaded")
-
-            # Wait for page to load
-            try:
-                wait_for_element(page, "button.jss56", timeout=30)
-            except PlaywrightTimeoutError:
-                logger.warning("Timeout waiting for buttons to load")
-                close_browser(browser_info)
-                browser_info = None
-                time.sleep(5)
-                continue
-
-            # Extra wait to ensure all buttons are loaded
-            time.sleep(5)
-
-            buttons = page.query_selector_all("button.jss56")
-            count = len(buttons)
-
-            if count > 0:
-                logger.info(f"Found {count} total property buttons")
-                close_browser(browser_info)
-                return count
-
-            logger.warning(f"No buttons found on attempt {attempt + 1}")
-            close_browser(browser_info)
-            browser_info = None
-            time.sleep(5)
-
-        except Exception as e:
-            logger.error(f"Error counting buttons: {str(e)}")
-            if browser_info:
-                close_browser(browser_info)
-                browser_info = None
-            time.sleep(5)
-
-    # If we get here, all attempts failed
-    logger.error("Failed to count buttons after all attempts")
-    return 0
+def try_close_modal(page, modal_selector_or_element):
+    """Helper function to try multiple methods to close a modal"""
+    close_success = False
+    try:
+        if isinstance(modal_selector_or_element, str):
+            modal_exists = page.query_selector(modal_selector_or_element) is not None
+        else:
+            modal_exists = modal_selector_or_element is not None
+        if not modal_exists:
+            return True
+        close_button_selectors = [
+            'button[aria-label="close"]',
+            'button svg[data-testid="CloseIcon"]',
+            '.MuiDialogTitle-root button',
+            '.MuiDialog-root button',
+            'button.MuiIconButton-root',
+        ]
+        for selector in close_button_selectors:
+            close_button = page.query_selector(selector)
+            if close_button:
+                try:
+                    close_button.click(force=True)
+                    time.sleep(1)
+                    if isinstance(modal_selector_or_element, str):
+                        close_success = not page.query_selector(modal_selector_or_element)
+                    else:
+                        close_success = True
+                    if close_success:
+                        logger.debug(f"{Fore.GREEN}Closed modal with button click using selector: {selector}{Style.RESET_ALL}")
+                        return True
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        page.keyboard.press("Escape")
+        time.sleep(1)
+        if isinstance(modal_selector_or_element, str):
+            close_success = not page.query_selector(modal_selector_or_element)
+        else:
+            close_success = True
+        if close_success:
+            logger.debug(f"{Fore.GREEN}Closed modal with Escape key{Style.RESET_ALL}")
+            return True
+    except Exception:
+        pass
+    try:
+        page.evaluate("""
+            () => {
+                const closeButtons = document.querySelectorAll('button[aria-label="close"]');
+                if (closeButtons.length) {
+                    closeButtons[0].click();
+                    return true;
+                }
+                const svgCloseIcons = document.querySelectorAll('svg[data-testid="CloseIcon"]');
+                if (svgCloseIcons.length) {
+                    const svg = svgCloseIcons[0];
+                    let clickTarget = svg;
+                    while (clickTarget && clickTarget.tagName !== 'BODY') {
+                        if (clickTarget.onclick || 
+                            clickTarget.tagName === 'BUTTON' ||
+                            clickTarget.getAttribute('role') === 'button') {
+                            clickTarget.click();
+                            return true;
+                        }
+                        clickTarget = clickTarget.parentElement;
+                    }
+                }
+                const dialogs = document.querySelectorAll('.MuiDialog-root, .MuiModal-root, [role="dialog"]');
+                for (const dialog of dialogs) {
+                    const buttons = dialog.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        const rect = btn.getBoundingClientRect();
+                        if (rect.width < 50 && rect.height < 50 && rect.top < dialog.getBoundingClientRect().top + 50) {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        """)
+        time.sleep(1)
+        if isinstance(modal_selector_or_element, str):
+            close_success = not page.query_selector(modal_selector_or_element)
+        else:
+            close_success = True
+        if close_success:
+            logger.debug(f"{Fore.GREEN}Closed modal with JavaScript{Style.RESET_ALL}")
+            return True
+    except Exception:
+        pass
+    logger.warning(f"{Fore.YELLOW}All methods to close modal failed{Style.RESET_ALL}")
+    return False
 
 
 def get_walmart_properties_with_small_spaces():
-    """
-    Main function to scrape Walmart leasing properties using true parallel processing.
-    """
-    logger.info("Starting true parallel Walmart leasing scraper...")
-
-    # First, determine total number of buttons with a single browser instance
-    buttons_count = get_total_button_count()
-
-    if buttons_count == 0:
-        logger.error("No property buttons found. Exiting.")
-        return []
-
-    logger.info(f"Found {buttons_count} total property buttons to process")
-
-    # Use a different approach - each worker gets non-consecutive buttons
-    # This ensures workers aren't all trying to load the same part of the page
-    all_indices = list(range(buttons_count))
-
-    # Create worker tasks that distribute indices more efficiently
-    # Each worker gets a stride pattern of indices (0, n, 2n, 3n, etc.)
-    worker_tasks = []
-    for i in range(WEB_WORKERS):
-        # Worker i gets buttons i, i+WEB_WORKERS, i+2*WEB_WORKERS, etc.
-        worker_indices = all_indices[i::WEB_WORKERS]
-        worker_tasks.append(worker_indices)
-
-    logger.info(f"Distributed {buttons_count} buttons across {WEB_WORKERS} workers")
-
-    # Process all tasks in parallel using ThreadPoolExecutor
-    all_properties = []
-
-    # Use concurrent.futures.ThreadPoolExecutor for parallel execution
-    with concurrent.futures.ThreadPoolExecutor(max_workers=WEB_WORKERS) as executor:
-        # Submit tasks to the executor
-        futures = []
-        for worker_id, indices in enumerate(worker_tasks):
-            futures.append(executor.submit(process_property_chunk, indices, worker_id))
-
-        # Process results as they complete (not waiting for all to finish)
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                properties = future.result()
-                all_properties.extend(properties)
-                logger.info(
-                    f"Received {len(properties)} properties from worker (total so far: {len(all_properties)})"
-                )
-            except Exception as e:
-                logger.error(f"Worker process generated an exception: {str(e)}")
-
-    # Deduplicate properties based on store_id
+    """Main function to scrape Walmart leasing properties using sequential processing."""
+    logger.info(f"{Fore.CYAN}Starting sequential Walmart leasing scraper...{Style.RESET_ALL}")
+    all_properties = process_properties_sequentially()
     deduplicated = {}
     for prop in all_properties:
         store_id = prop.get("store_id")
@@ -738,10 +741,8 @@ def get_walmart_properties_with_small_spaces():
             > len(deduplicated[store_id].get("spaces", []))
         ):
             deduplicated[store_id] = prop
-
     deduplicated_properties = list(deduplicated.values())
     logger.info(
-        f"Found {len(deduplicated_properties)} unique properties with spaces under {MAX_SPACE_SIZE} sqft"
+        f"{Fore.GREEN}Final result: {len(deduplicated_properties)} unique properties with spaces under {MAX_SPACE_SIZE} sqft{Style.RESET_ALL}"
     )
-
     return deduplicated_properties

@@ -1,17 +1,21 @@
 # Required packages for Walmart Leasing Checker
 
-# Web automation with Playwright
-playwright>=1.40.0  # Latest stable version
-
-# HTML parsing
-beautifulsoup4>=4.12.2
-
-# HTTP requests and API interaction
-requests>=2.28.2
-
-# Scheduling and Parallelization
-schedule>=1.2.0
+# Core requirements
+playwright>=1.28.0
+beautifulsoup4>=4.11.1
+schedule>=1.1.0
 psutil>=5.9.0
+colorama>=0.4.4
+requests>=2.28.1
 
-# Utilities
-python-dotenv>=1.0.0  # Optional: For storing credentials securely
+# Geocoding requirements
+geopy>=2.3.0
+
+# Email requirements
+# (Used built-in libraries)
+
+# Google Maps scraping
+# (Using Playwright from core requirements)
+
+# DataForSEO API integration
+# (Using requests from core requirements)
