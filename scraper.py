@@ -1,7 +1,3 @@
-"""
-Core scraper functionality for Walmart leasing properties
-Using Playwright for browser automation
-"""
 
 import re
 import time
@@ -22,27 +18,23 @@ from playwright_utils import (
     force_click,
 )
 
-# Initialize colorama for cross-platform colored terminal output
 init(autoreset=True)
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-
 def extract_property_info(button_html):
-    """Extract basic property info from button HTML."""
     soup = BeautifulSoup(button_html, "html.parser")
 
-    # Extract store info div
+    
     store_info_div = soup.select_one(".jss58")
     if not store_info_div:
         return None
 
-    # Extract store number - improved extraction
+    
     store_number_elem = store_info_div.select_one("b.jss53")
     store_number_text = store_number_elem.text if store_number_elem else "Unknown"
 
-    # Extract the numeric store ID more carefully
+    
     store_id_match = re.search(r"Store #(\d+)", store_number_text)
     store_id = (
         store_id_match.group(1)
@@ -50,24 +42,24 @@ def extract_property_info(button_html):
         else store_number_text.replace("Store #", "").strip()
     )
 
-    # Extract available spaces
+    
     available_spaces_elem = store_info_div.select("b.jss53")
     available_spaces = (
         available_spaces_elem[-1].text if len(available_spaces_elem) > 2 else "Unknown"
     )
 
-    # Extract address
+    
     address_elem = store_info_div.select_one("p.jss54")
     address = address_elem.text.strip() if address_elem else "Unknown"
 
-    # Extract Google Maps URL
+    
     maps_link = store_info_div.select_one("a.jss55")
     maps_url = maps_link["href"] if maps_link and maps_link.has_attr("href") else ""
 
     return {
-        "store_id": store_id,  # Just the numeric ID
-        "store_number": f"Store #{store_id}",  # Full store number with prefix
-        "store_name": store_number_text,  # Original store name text
+        "store_id": store_id,  
+        "store_number": f"Store #{store_id}",  
+        "store_name": store_number_text,  
         "address": address,
         "available_spaces": available_spaces.strip(),
         "google_maps_url": maps_url,
@@ -76,23 +68,22 @@ def extract_property_info(button_html):
 
 
 def extract_modal_data(modal_html):
-    """Extract spaces information from modal HTML with accurate detection for all square footage sizes."""
     soup = BeautifulSoup(modal_html, "html.parser")
     spaces = []
 
-    # NEW APPROACH: Look for the correct modal structure based on the actual HTML
-    # Check if we're seeing the modal content or the navigation bar
+    
+    
     if modal_html and '<div class="MuiToolbar-root MuiToolbar-regular">' in modal_html:
         logger.debug(f"{Fore.YELLOW}Modal HTML appears to be the navigation bar, not the modal content{Style.RESET_ALL}")
-        return spaces  # Return empty spaces, let JS extraction handle it
+        return spaces  
     
-    # Since the JavaScript extraction is working well, we'll keep a simplified HTML extraction
-    # as a fallback only
     
-    # Simple pattern-based extraction for Suite | sqft format
+    
+    
+    
     suite_pattern = re.compile(r'Suite\s+(\w+)\s*\|\s*(\d+)\s*sqft', re.IGNORECASE)
     
-    # Apply this pattern to all text content
+    
     text_content = soup.get_text()
     for match in suite_pattern.finditer(text_content):
         try:
@@ -107,12 +98,12 @@ def extract_modal_data(modal_html):
         except (ValueError, IndexError) as e:
             logger.warning(f"{Fore.YELLOW}Error extracting suite details: {e}{Style.RESET_ALL}")
 
-    # Extra validation and logging - don't show warnings here since we know JS is working
+    
     if spaces:
         logger.info(f"{Fore.GREEN}Found {len(spaces)} spaces via HTML parsing: {[(s['suite'], s['sqft']) for s in spaces]}{Style.RESET_ALL}")
-    # Don't log a warning here since this is expected to fail when JS extraction works
     
-    # Return spaces sorted by suite number for consistency
+    
+    
     return sorted(spaces, key=lambda x: x.get("suite", ""))
 
 
@@ -120,14 +111,14 @@ def extract_modal_data_from_html(modal_html):
     """Extract spaces information from modal HTML string (helper for JavaScript extraction)."""
     spaces = []
     
-    # Process using BeautifulSoup
+    
     soup = BeautifulSoup(modal_html, "html.parser")
     
     try:
-        # Look for suite information in the HTML
+        
         suite_pattern = re.compile(r'Suite\s+(\w+)\s*\|\s*(\d+)\s*sqft', re.IGNORECASE)
         
-        # Find all text nodes in the HTML
+        
         for text in soup.stripped_strings:
             match = suite_pattern.search(text)
             if match:
@@ -141,7 +132,7 @@ def extract_modal_data_from_html(modal_html):
                 logger.info(f"{Fore.GREEN}Direct HTML extraction: Suite {suite} | {sqft} sqft{Style.RESET_ALL}")
         
         if spaces:
-            # Deduplicate spaces
+            
             unique_spaces = {}
             for space in spaces:
                 suite = space["suite"]
@@ -164,7 +155,7 @@ def process_properties_sequentially():
         List of property dictionaries with space information
     """
     logger.info(f"{Fore.CYAN}Step 1: Starting sequential Walmart leasing scraper...{Style.RESET_ALL}")
-    # Create a browser instance for the entire process
+    
     browser_info = setup_playwright_browser(headless=True, retries=3)
     if not browser_info:
         logger.error(f"{Fore.RED}Failed to create browser instance after multiple attempts{Style.RESET_ALL}")
@@ -174,16 +165,16 @@ def process_properties_sequentially():
     eligible_properties = []
     
     try:
-        # Step 1: Load the website
+        
         logger.info(f"{Fore.CYAN}Step 1: Loading Walmart leasing page...{Style.RESET_ALL}")
         page.goto(WALMART_LEASING_URL, wait_until="domcontentloaded")
         try:
-            wait_for_element(page, "button.jss56", timeout=60)  # Increased timeout
+            wait_for_element(page, "button.jss56", timeout=60)  
             logger.info(f"{Fore.GREEN}Page loaded successfully{Style.RESET_ALL}")
         except PlaywrightTimeoutError:
             logger.error(f"{Fore.RED}Timeout waiting for page to load{Style.RESET_ALL}")
             return []
-        time.sleep(10)  # Increased from 5 to 10
+        time.sleep(10)  
         logger.info(f"{Fore.CYAN}Step 2: Identifying all available properties...{Style.RESET_ALL}")
         all_buttons = page.query_selector_all("button.jss56")
         button_count = len(all_buttons)
@@ -281,17 +272,17 @@ def process_properties_sequentially():
                                 continue
                     time.sleep(5)
                     modal_selectors = [
-                        # More specific selectors
+                        
                         ".MuiDialog-paperScrollPaper", 
                         ".MuiDialog-paper",
-                        # Try with content-specific selectors
+                        
                         "div[role='dialog'] div:has(p:contains('Store #'))",
                         "div[role='dialog'] div:has(p:contains('Showing'))",
-                        # Then try the general selectors with filtering
+                        
                         ".MuiDialog-container",
                         ".MuiModal-root",
                         "div[role='dialog']",
-                        # Only use .MuiPaper-root as last resort with content verification
+                        
                         ".MuiPaper-root"
                     ]
                     
@@ -303,7 +294,7 @@ def process_properties_sequentially():
                         try:
                             elements = page.query_selector_all(selector)
                             for element in elements:
-                                # Skip if this is the navbar
+                                
                                 inner_html = element.inner_html()
                                 if ('class="MuiToolbar-root"' in inner_html or 
                                     'Your Shop at Walmart' in inner_html or
@@ -312,8 +303,8 @@ def process_properties_sequentially():
                                     logger.debug(f"Skipping navbar element found with selector: {selector}")
                                     continue
                                     
-                                # Look for indicators this is the modal we want
-                                # Try to verify this is actual modal content by checking for likely content
+                                
+                                
                                 modal_content_check = page.evaluate("""
                                     (element) => {
                                         // Check if element contains store information text
@@ -358,11 +349,11 @@ def process_properties_sequentially():
                     modal_html = ""
                     js_spaces = []
                     try:
-                        # Get modal HTML for debugging first
+                        
                         if modal_element:
                             modal_html = modal_element.inner_html()
                         
-                        # Fixed JavaScript extraction code
+                        
                         js_extract_result = page.evaluate("""
                             () => {
                                 const result = {
@@ -416,7 +407,7 @@ def process_properties_sequentially():
                             }
                         """)
                         
-                        # Process JS extraction results immediately
+                        
                         if js_extract_result and js_extract_result.get('spaces'):
                             logger.info(f"{Fore.GREEN}JS extraction found {len(js_extract_result['spaces'])} spaces{Style.RESET_ALL}")
                             for space in js_extract_result['spaces']:
@@ -429,7 +420,7 @@ def process_properties_sequentially():
                         else:
                             logger.warning(f"{Fore.YELLOW}JavaScript extraction found no spaces for {store_number}{Style.RESET_ALL}")
                             
-                            # Try fallback direct HTML scanning
+                            
                             direct_js_result = page.evaluate("""
                                 () => {
                                     const spaces = [];
@@ -472,10 +463,10 @@ def process_properties_sequentially():
                             logger.error(f"{Fore.RED}Failed to get page content: {str(page_e)}{Style.RESET_ALL}")
                             modal_html = ""
                     
-                    # Try HTML parsing approach
+                    
                     html_spaces = extract_modal_data(modal_html)
                     
-                    # IMPORTANT: If JS results exist, use those; otherwise use HTML parsing results
+                    
                     if js_spaces:
                         spaces = js_spaces
                         if not html_spaces:
@@ -485,7 +476,7 @@ def process_properties_sequentially():
                         if not spaces:
                             logger.warning(f"{Fore.RED}✗ NO SPACES: {store_number} - Could not extract any space information{Style.RESET_ALL}")
                     
-                    # Save modal HTML for debugging
+                    
                     try:
                         debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_html")
                         os.makedirs(debug_dir, exist_ok=True)
@@ -496,7 +487,7 @@ def process_properties_sequentially():
                     except Exception as e:
                         logger.debug(f"Could not save debug HTML: {e}")
                     
-                    # Continue with the rest of the processing
+                    
                     for space in spaces:
                         space["store_id"] = store_id
                     
@@ -526,11 +517,11 @@ def process_properties_sequentially():
                     back_selectors = [
                         'div.jss152',
                         'div.jss125',
-                        # Use standard selectors without :contains()
+                        
                         'div[class^="jss"] svg + span',
                         'div[class^="jss"]:has(svg)',
                         'div[class^="jss"] svg',
-                        # Try using text content evaluation
+                        
                         'button[aria-label="Back"]',
                         'div[role="button"]'
                     ]
@@ -547,7 +538,7 @@ def process_properties_sequentially():
                         except Exception as e:
                             logger.debug(f"Back button click failed with selector {selector}: {str(e)}")
                     
-                    # Use JavaScript approach to find by text content if standard selectors failed
+                    
                     if not back_clicked:
                         try:
                             page.evaluate("""
@@ -627,7 +618,7 @@ def process_properties_sequentially():
     except Exception as e:
         logger.error(f"{Fore.RED}Critical error in scraper: {str(e)}{Style.RESET_ALL}")
     finally:
-        # Always clean up resources
+        
         close_browser(browser_info)
     return properties
 

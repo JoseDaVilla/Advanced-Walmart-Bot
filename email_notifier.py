@@ -1,6 +1,3 @@
-"""
-Funciones de notificación por correo electrónico para el Verificador de Arrendamiento de Walmart
-"""
 
 import logging
 import smtplib
@@ -9,17 +6,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from config import EMAIL_SENDER, EMAIL_RECEIVER, EMAIL_PASSWORD
 
-# Configuración de logs
 logger = logging.getLogger(__name__)
 
-
 def send_email(properties):
-    """
-    Envía notificación por correo electrónico sobre propiedades coincidentes.
-
-    Args:
-        properties: Lista de propiedades que coinciden con criterios
-    """
     if not properties:
         logger.info("No hay propiedades sobre las cuales notificar")
         return
@@ -32,7 +21,7 @@ def send_email(properties):
             f"Oportunidades de Arrendamiento en Walmart - {datetime.now().strftime('%Y-%m-%d')}"
         )
 
-        # Crear contenido HTML con estructura de tabla mejorada
+        
         html_content = f"""
         <html>
         <head>
@@ -94,25 +83,25 @@ def send_email(properties):
                 </tr>
         """
 
-        # Agregar versión de texto plano también
+        
         text_content = "Oportunidades de Arrendamiento en Walmart\n\n"
         text_content += f"Se encontraron {len(properties)} ubicaciones que coinciden con sus criterios:\n\n"
 
-        # Agregar cada propiedad al correo electrónico con formato de espacio mejorado
+        
         for prop in properties:
-            # Usar el ID de tienda del sitio de arrendamiento como ID principal
+            
             store_id = prop.get("store_id", "Unknown")
             store_num = f"Tienda #{store_id}"
 
-            # Dirección original del sitio de arrendamiento
+            
             leasing_address = prop.get("address", "Unknown")
 
-            # Usar ciudad y código postal de los datos de Google
+            
             city = prop.get("city", "Unknown")
             zip_code = prop.get("zip_code", "Unknown")
             reviews = prop.get("review_count", "N/A")
 
-            # Crear un enlace simple al sitio web de Walmart si está disponible
+            
             website = prop.get("website", "")
             website_html = (
                 f"<br><a href='{website}' target='_blank'>Sitio Web</a>"
@@ -120,7 +109,7 @@ def send_email(properties):
                 else ""
             )
 
-            # Crear detalles de espacio HTML - formato mejorado con viñetas
+            
             space_html = "<ul class='space-list'>"
             space_text = ""
 
@@ -132,11 +121,11 @@ def send_email(properties):
 
             space_html += "</ul>"
 
-            # Todas las propiedades en la lista final han sido confirmadas para NO tener tiendas móviles
+            
             radius = prop.get("mobile_store_search_radius", "100m")
             mobile_store = f"No se detectaron tiendas móviles en un radio de {radius} <span class='check'>&check;</span>"
 
-            # Agregar al contenido HTML con diseño mejorado
+            
             html_content += f"""
                 <tr>
                     <td><strong>{store_num}</strong>{website_html}</td>
@@ -149,12 +138,12 @@ def send_email(properties):
                 </tr>
             """
 
-            # Agregar al contenido de texto
+            
             text_content += f"• {store_num} en {leasing_address} - {city}, {zip_code} - {reviews} reseñas - Sin tiendas móviles *\n"
             text_content += space_text
             text_content += "\n"
 
-        # Cerrar el HTML con mejor explicación de detección de tiendas móviles
+        
         html_content += """
             </table>
             <p>Este es un mensaje automatizado de su Verificador de Arrendamiento de Walmart.</p>
@@ -179,11 +168,11 @@ def send_email(properties):
         </html>
         """
 
-        # Adjuntar partes de texto y HTML
+        
         msg.attach(MIMEText(text_content, "plain"))
         msg.attach(MIMEText(html_content, "html"))
 
-        # Enviar el correo electrónico
+        
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)

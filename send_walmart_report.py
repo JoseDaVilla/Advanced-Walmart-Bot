@@ -1,7 +1,3 @@
-"""
-Script to generate and send email reports of eligible Walmart stores
-Can be run independently to send a report from existing JSON data
-"""
 
 import os
 import json
@@ -14,10 +10,10 @@ from colorama import Fore, Style, init
 from config import OUTPUT_DIR, MAX_SPACE_SIZE, MIN_REVIEWS, EMAIL_RECEIVER
 from email_notifier import send_email
 
-# Initialize colorama
+
 init(autoreset=True)
 
-# Configure logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -30,25 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 def load_eligible_stores(filename=None):
-    """
-    Load eligible stores from a JSON file.
-    
-    Args:
-        filename: Optional specific JSON filename to load. If None, will try common filenames.
-        
-    Returns:
-        List of eligible store dictionaries
-    """
-    # If no filename specified, try common filenames in priority order
+
     if not filename:
         possible_files = [
-            "eligible_stores.json",  # From review_scraper.py
-            "properties_with_reviews.json",  # From main.py intermediate results
-            "matching_properties.json",  # Final matching properties
-            "small_space_properties.json",  # Initial eligible small space properties
+            "eligible_stores.json",  
+            "properties_with_reviews.json",  
+            "matching_properties.json",  
+            "small_space_properties.json",  
         ]
         
-        # Try each file in order
+        
         for file in possible_files:
             filepath = os.path.join(OUTPUT_DIR, file)
             if os.path.exists(filepath):
@@ -57,20 +44,20 @@ def load_eligible_stores(filename=None):
                 break
                 
         if not filename:
-            # Look for timestamped eligible stores files
+            
             timestamp_files = [f for f in os.listdir(OUTPUT_DIR) 
                                if f.startswith("eligible_stores_") and f.endswith(".json")]
             if timestamp_files:
-                # Use the most recent one
+                
                 newest_file = sorted(timestamp_files)[-1]
                 filename = os.path.join(OUTPUT_DIR, newest_file)
                 logger.info(f"Using most recent eligible stores file: {newest_file}")
     else:
-        # If filename was explicitly provided
+        
         if not os.path.isabs(filename):
             filename = os.path.join(OUTPUT_DIR, filename)
     
-    # Check if file exists
+    
     if not filename or not os.path.exists(filename):
         logger.error(f"Could not find eligible stores data file")
         return []
@@ -87,15 +74,7 @@ def load_eligible_stores(filename=None):
 
 
 def filter_eligible_stores(stores):
-    """
-    Filter stores to ensure only truly eligible ones are included.
-    
-    Args:
-        stores: List of store dictionaries
-        
-    Returns:
-        List of filtered eligible store dictionaries
-    """
+
     if not stores:
         return []
         
@@ -105,12 +84,12 @@ def filter_eligible_stores(stores):
         eligible_spaces = [s for s in store.get("spaces", []) 
                           if s.get("sqft", 0) < MAX_SPACE_SIZE]
         
-        # Check if it meets all eligibility criteria
+        
         if (eligible_spaces and 
             store.get("review_count", 0) >= MIN_REVIEWS and
             not store.get("has_mobile_store", False)):
             
-            # Ensure spaces field only includes eligible spaces
+            
             store_copy = store.copy()
             store_copy["spaces"] = eligible_spaces
             eligible.append(store_copy)
@@ -120,12 +99,7 @@ def filter_eligible_stores(stores):
 
 
 def print_store_details(stores):
-    """
-    Print details of eligible stores to console for review.
-    
-    Args:
-        stores: List of eligible store dictionaries
-    """
+
     if not stores:
         print(f"{Fore.YELLOW}No eligible stores found{Style.RESET_ALL}")
         return
@@ -169,17 +143,17 @@ def main():
     
     args = parser.parse_args()
     
-    # Create output directory if it doesn't exist
+    
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Load and filter stores
+    
     stores = load_eligible_stores(args.file)
     eligible_stores = filter_eligible_stores(stores)
     
-    # Print stores to console
+    
     print_store_details(eligible_stores)
     
-    # Send email if requested
+    
     if not args.print_only:
         if eligible_stores:
             receiver = args.email or EMAIL_RECEIVER
